@@ -1,108 +1,200 @@
 /**
  * OpenHands Resolver MCP - Main Entry Point
  * 
- * This is the main entry point for the OpenHands Resolver MCP.
- * It integrates all modules and provides the interface for Claude Desktop.
+ * This is the main entry point for the OpenHands Resolver Model Context Protocol.
+ * It integrates all modules and establishes the flow for GitHub issue resolution.
  */
 
 // Load environment variables
 require('dotenv').config();
 
 // Import core modules
-const TriggerDetection = require('./trigger_detection');
-const GitHubAPI = require('./github_api');
-const TaskSetup = require('./task_setup');
-const CodeGeneration = require('./code_generation');
-const CommitPR = require('./commit_pr');
-const Feedback = require('./feedback');
-const BatchProcessing = require('./batch_processing');
-const Configuration = require('./configuration');
+const configModule = require('./modules/configuration');
+const triggerModule = require('./modules/trigger_detection');
+const githubModule = require('./modules/github_api');
+const taskSetupModule = require('./modules/task_setup');
+const codeGenModule = require('./modules/code_generation');
+const commitPrModule = require('./modules/commit_pr');
+const feedbackModule = require('./modules/feedback');
+const batchModule = require('./modules/batch_processing');
+const logger = require('./utils/logger');
+
+// Track initialization state
+let isInitialized = false;
 
 /**
- * Main class for the OpenHands Resolver MCP
+ * Initialize the OpenHands Resolver
+ * @param {string} configPath - Optional path to configuration file
+ * @returns {Promise<boolean>} - Success status
  */
-class OpenHandsResolver {
-  constructor() {
-    this.config = new Configuration();
-    this.github = new GitHubAPI(this.config);
-    this.triggerDetection = new TriggerDetection(this.config);
-    this.taskSetup = new TaskSetup(this.config, this.github);
-    this.codeGeneration = new CodeGeneration(this.config);
-    this.commitPR = new CommitPR(this.config, this.github);
-    this.feedback = new Feedback(this.config, this.github);
-    this.batchProcessing = new BatchProcessing(this.config);
-  }
-
-  /**
-   * Initialize the resolver
-   */
-  async initialize() {
-    await this.config.load();
-    console.log('OpenHands Resolver MCP initialized');
-  }
-
-  /**
-   * Handle a trigger event to start the resolution process
-   * @param {Object} trigger - The trigger event data
-   */
-  async handleTrigger(trigger) {
-    try {
-      console.log(`Processing trigger: ${JSON.stringify(trigger)}`);
-      
-      // Get issue data from GitHub
-      const issueData = await this.github.getIssueData(trigger.repository, trigger.issueNumber);
-      
-      // Set up task for OpenHands agents
-      const task = await this.taskSetup.createTask(issueData);
-      
-      // Generate code solution
-      const solution = await this.codeGeneration.generateSolution(task);
-      
-      // Validate the solution
-      const validationResult = await this.codeGeneration.validateSolution(solution);
-      
-      if (!validationResult.success) {
-        console.error(`Validation failed: ${validationResult.message}`);
-        await this.feedback.provideFeedback(issueData, null, validationResult);
-        return;
-      }
-      
-      // Create commit and PR
-      const prResult = await this.commitPR.createPullRequest(
-        issueData,
-        solution,
-        trigger.branch || `fix-${trigger.issueNumber}`
-      );
-      
-      // Provide feedback
-      await this.feedback.provideFeedback(issueData, prResult, validationResult);
-      
-      console.log(`Successfully processed issue #${trigger.issueNumber}`);
-      return { success: true, prUrl: prResult.url };
-    } catch (error) {
-      console.error(`Error in resolution process: ${error.message}`);
-      console.error(error.stack);
-      return { success: false, error: error.message };
+async function initialize(configPath) {
+  try {
+    if (isInitialized) {
+      logger.debug('OpenHands Resolver already initialized');
+      return true;
     }
-  }
 
-  /**
-   * Process multiple issues in batch
-   * @param {Array} issues - Array of issue identifiers
-   */
-  async processBatch(issues) {
-    return await this.batchProcessing.process(issues, this.handleTrigger.bind(this));
+    logger.info('Initializing OpenHands Resolver MCP');
+    
+    // Initialize configuration
+    await configModule.initialize(configPath);
+    logger.debug('Configuration module initialized');
+    
+    // Initialize GitHub API integration
+    await githubModule.initialize();
+    logger.debug('GitHub API module initialized');
+    
+    isInitialized = true;
+    logger.info('OpenHands Resolver MCP initialized successfully');
+    return true;
+  } catch (error) {
+    logger.error('Failed to initialize OpenHands Resolver MCP:', error);
+    return false;
   }
 }
 
-// Export the main class
-module.exports = OpenHandsResolver;
-
-// If this file is run directly, initialize and export the instance
-if (require.main === module) {
-  const resolver = new OpenHandsResolver();
-  resolver.initialize().catch(console.error);
-  
-  // Export for Claude Desktop MCP integration
-  global.openHandsResolver = resolver;
+/**
+ * Main function to process a GitHub issue resolution request
+ * @param {Object} triggerData - Data from the trigger detection module
+ * @returns {Promise<Object>} - Result of the resolution process
+ */
+async function resolveIssue(triggerData) {
+  try {
+    logger.info(`Starting resolution process for issue: ${triggerData.issueUrl}`);
+    
+    // Fetch GitHub issue data
+    const issueData = await githubModule.fetchIssueData(triggerData.issueUrl);
+    logger.debug(`Fetched data for issue #${issueData.number}`);
+    
+    // Setup task for AI resolution
+    const taskConfig = await taskSetupModule.setupTask(issueData);
+    logger.debug('Task setup completed');
+    
+    // Generate code fix
+    const codeChanges = await codeGenModule.generateAndValidateCode(taskConfig);
+    logger.info(`Generated ${codeChanges.codeChanges.length} code changes`);
+    
+    // Create commit and PR
+    const prResult = await commitPrModule.createPullRequest(codeChanges, issueData);
+    logger.info(`Created pull request: ${prResult.pullRequestUrl}`);
+    
+    // Provide feedback
+    const feedbackResult = await feedbackModule.provideFeedback(prResult, issueData);
+    logger.debug('Feedback provided to issue');
+    
+    // Create visualization
+    const visualization = feedbackModule.createVisualization(prResult, issueData, codeChanges);
+    
+    return {
+      success: true,
+      issueUrl: triggerData.issueUrl,
+      issueNumber: issueData.number,
+      pullRequestUrl: prResult.pullRequestUrl,
+      pullRequestNumber: prResult.pullRequestNumber,
+      branch: prResult.branch,
+      changedFiles: codeChanges.codeChanges.length,
+      visualization
+    };
+  } catch (error) {
+    logger.error(`Failed to resolve issue ${triggerData.issueUrl}:`, error);
+    return {
+      success: false,
+      issueUrl: triggerData.issueUrl,
+      error: error.message
+    };
+  }
 }
+
+/**
+ * Process a batch of GitHub issues
+ * @param {Array} issueList - List of issue URLs or identifiers
+ * @returns {Promise<Array>} - Results for each issue
+ */
+async function resolveBatch(issueList) {
+  return batchModule.processBatch(issueList, resolveIssue);
+}
+
+/**
+ * Main handler for MCP invocation
+ * @param {Object} input - User input from Claude Desktop
+ * @returns {Promise<Object>} - Result of the operation
+ */
+async function handleMcpInvocation(input) {
+  try {
+    // Initialize if not already initialized
+    if (!isInitialized) {
+      const initSuccess = await initialize();
+      if (!initSuccess) {
+        return {
+          success: false,
+          message: 'Failed to initialize OpenHands Resolver MCP'
+        };
+      }
+    }
+    
+    // Detect trigger from user input
+    const triggerData = triggerModule.detectTrigger(input);
+    
+    if (!triggerData) {
+      return {
+        success: false,
+        message: 'No valid GitHub issue detected in the input'
+      };
+    }
+    
+    // Check if trigger is valid
+    if (!triggerModule.validateTrigger(triggerData)) {
+      return {
+        success: false,
+        message: 'Invalid trigger data, missing required information'
+      };
+    }
+    
+    // Check if this is a batch request
+    if (triggerData.isBatch && triggerData.issueList && triggerData.issueList.length > 0) {
+      logger.info(`Processing batch request with ${triggerData.issueList.length} issues`);
+      return {
+        success: true,
+        isBatch: true,
+        results: await resolveBatch(triggerData.issueList)
+      };
+    }
+    
+    // Process single issue
+    logger.info('Processing single issue resolution request');
+    return await resolveIssue(triggerData);
+  } catch (error) {
+    logger.error('Error handling MCP invocation:', error);
+    return {
+      success: false,
+      message: `Error: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Get information about the OpenHands Resolver MCP
+ * @returns {Object} - MCP information
+ */
+function getMcpInfo() {
+  return {
+    name: 'OpenHands Resolver MCP',
+    version: '0.1.0',
+    description: 'AI-driven GitHub issue resolution system',
+    initialized: isInitialized,
+    capabilities: [
+      'GitHub issue resolution',
+      'Code generation and validation',
+      'Pull request creation',
+      'Batch processing'
+    ]
+  };
+}
+
+module.exports = {
+  initialize,
+  handleMcpInvocation,
+  resolveIssue,
+  resolveBatch,
+  getMcpInfo
+};
