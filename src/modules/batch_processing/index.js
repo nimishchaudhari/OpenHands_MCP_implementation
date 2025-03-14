@@ -1,233 +1,196 @@
 /**
  * Batch Processing Module
- * Enables simultaneous resolution of multiple issues
+ * 
+ * Resolves multiple issues concurrently
  */
 
 const logger = require('../../utils/logger');
 const configModule = require('../configuration');
 
 /**
- * Process a batch of issues
- * @param {Array<Object>} issueList - List of issues to process
- * @param {Function} resolveFunction - Function to resolve a single issue
- * @returns {Promise<Array<Object>>} - Results for each issue
+ * Process a batch of GitHub issues
+ * 
+ * @param {Array} issueList - List of issue objects with issueUrl, owner, repo, issueNumber
+ * @param {Function} resolveFn - Function to resolve a single issue
+ * @returns {Promise<Array>} - Results for each issue
  */
-async function processBatch(issueList, resolveFunction) {
-  try {
-    logger.info(`Processing batch of ${issueList.length} issues`);
-    
-    const results = [];
-    const resolverConfig = configModule.getSection('resolver');
-    
-    // Determine if we should process in parallel or sequentially
-    const isParallel = resolverConfig.batchParallelProcessing === true;
-    const maxConcurrent = resolverConfig.maxConcurrentBatchItems || 3;
-    
-    if (isParallel) {
-      logger.info(`Processing batch in parallel (max ${maxConcurrent} concurrent)`);
-      results.push(...await processParallel(issueList, resolveFunction, maxConcurrent));
-    } else {
-      logger.info('Processing batch sequentially');
-      results.push(...await processSequential(issueList, resolveFunction));
-    }
-    
-    logger.info(`Batch processing completed: ${results.filter(r => r.success).length} succeeded, ${results.filter(r => !r.success).length} failed`);
-    
-    return results;
-  } catch (error) {
-    logger.error('Batch processing failed:', error);
-    throw new Error(`Batch processing failed: ${error.message}`);
+async function processBatch(issueList, resolveFn) {
+  if (!Array.isArray(issueList) || issueList.length === 0) {
+    throw new Error('Invalid or empty issue list for batch processing');
   }
+  
+  logger.info(`Starting batch processing for ${issueList.length} issues`);
+  
+  // Get batch configuration
+  const batchConfig = configModule.getConfigSection('batch') || {};
+  const maxConcurrent = batchConfig.maxConcurrent || 3;
+  const maxIssuesPerBatch = batchConfig.maxIssuesPerBatch || 10;
+  
+  // Limit the number of issues to process
+  const limitedIssueList = issueList.slice(0, maxIssuesPerBatch);
+  if (limitedIssueList.length < issueList.length) {
+    logger.warn(`Limiting batch to ${maxIssuesPerBatch} issues (${issueList.length} provided)`);
+  }
+  
+  // Process issues with concurrency limit
+  const results = await processWithConcurrencyLimit(limitedIssueList, resolveFn, maxConcurrent);
+  
+  // Log batch processing results
+  const successCount = results.filter(result => result.success).length;
+  logger.info(`Batch processing completed: ${successCount}/${results.length} issues resolved successfully`);
+  
+  return results;
 }
 
 /**
- * Process issues sequentially
+ * Process a list of items with a concurrency limit
+ * 
  * @private
- * @param {Array<Object>} issueList - List of issues to process
- * @param {Function} resolveFunction - Function to resolve a single issue
- * @returns {Promise<Array<Object>>} - Results for each issue
+ * @param {Array} items - List of items to process
+ * @param {Function} processFn - Function to process a single item
+ * @param {number} concurrencyLimit - Maximum number of concurrent operations
+ * @returns {Promise<Array>} - Results for each item
  */
-async function processSequential(issueList, resolveFunction) {
-  const results = [];
+async function processWithConcurrencyLimit(items, processFn, concurrencyLimit) {
+  const results = new Array(items.length);
+  let currentIndex = 0;
   
-  for (const issue of issueList) {
+  // Function to process the next item
+  async function processNext() {
+    const index = currentIndex++;
+    if (index >= items.length) return;
+    
     try {
-      logger.info(`Processing issue: ${issue.issueUrl}`);
-      const result = await resolveFunction(issue);
-      results.push({
-        issueUrl: issue.issueUrl,
-        issueNumber: issue.issueNumber,
-        owner: issue.owner,
-        repo: issue.repo,
-        success: true,
-        result
-      });
+      // Process the item and store the result
+      const item = items[index];
+      logger.debug(`Processing batch item ${index + 1}/${items.length}: ${JSON.stringify(item)}`);
+      
+      results[index] = await processFn(item);
+      
+      // Log success status
+      const success = results[index].success;
+      logger.debug(`Item ${index + 1} processed: ${success ? 'success' : 'failure'}`);
     } catch (error) {
-      logger.error(`Failed to process issue ${issue.issueUrl}:`, error);
-      results.push({
-        issueUrl: issue.issueUrl,
-        issueNumber: issue.issueNumber,
-        owner: issue.owner,
-        repo: issue.repo,
+      // Store error result
+      logger.error(`Error processing batch item ${index + 1}:`, error);
+      results[index] = {
         success: false,
-        error: error.message
-      });
-    }
-  }
-  
-  return results;
-}
-
-/**
- * Process issues in parallel
- * @private
- * @param {Array<Object>} issueList - List of issues to process
- * @param {Function} resolveFunction - Function to resolve a single issue
- * @param {number} maxConcurrent - Maximum number of concurrent processes
- * @returns {Promise<Array<Object>>} - Results for each issue
- */
-async function processParallel(issueList, resolveFunction, maxConcurrent) {
-  const results = [];
-  const chunks = chunkArray(issueList, maxConcurrent);
-  
-  for (const chunk of chunks) {
-    const chunkPromises = chunk.map(async issue => {
-      try {
-        logger.info(`Processing issue: ${issue.issueUrl}`);
-        const result = await resolveFunction(issue);
-        return {
-          issueUrl: issue.issueUrl,
-          issueNumber: issue.issueNumber,
-          owner: issue.owner,
-          repo: issue.repo,
-          success: true,
-          result
-        };
-      } catch (error) {
-        logger.error(`Failed to process issue ${issue.issueUrl}:`, error);
-        return {
-          issueUrl: issue.issueUrl,
-          issueNumber: issue.issueNumber,
-          owner: issue.owner,
-          repo: issue.repo,
-          success: false,
-          error: error.message
-        };
-      }
-    });
-    
-    // Process this chunk in parallel
-    const chunkResults = await Promise.all(chunkPromises);
-    results.push(...chunkResults);
-  }
-  
-  return results;
-}
-
-/**
- * Split an array into chunks
- * @private
- * @param {Array} array - Array to split
- * @param {number} chunkSize - Size of each chunk
- * @returns {Array<Array>} - Array of chunks
- */
-function chunkArray(array, chunkSize) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += chunkSize) {
-    chunks.push(array.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
-/**
- * Get statistics for a batch process
- * @param {Array<Object>} results - Results from processBatch
- * @returns {Object} - Statistics about the batch process
- */
-function getBatchStatistics(results) {
-  const totalIssues = results.length;
-  const successCount = results.filter(r => r.success).length;
-  const failureCount = totalIssues - successCount;
-  const successRate = totalIssues > 0 ? (successCount / totalIssues) * 100 : 0;
-  
-  // Group by repository
-  const repositories = {};
-  for (const result of results) {
-    const repoKey = `${result.owner}/${result.repo}`;
-    
-    if (!repositories[repoKey]) {
-      repositories[repoKey] = {
-        total: 0,
-        success: 0,
-        failure: 0
+        error: error.message,
+        issueUrl: items[index].issueUrl
       };
     }
     
-    repositories[repoKey].total += 1;
-    if (result.success) {
-      repositories[repoKey].success += 1;
-    } else {
-      repositories[repoKey].failure += 1;
-    }
+    // Process next item
+    return processNext();
   }
   
-  // Extract common error patterns
-  const errorCounts = {};
-  for (const result of results) {
-    if (!result.success && result.error) {
-      // Simplify error messages to group similar errors
-      const simplifiedError = simplifyErrorMessage(result.error);
-      
-      if (!errorCounts[simplifiedError]) {
-        errorCounts[simplifiedError] = 0;
-      }
-      
-      errorCounts[simplifiedError] += 1;
-    }
+  // Start processing with concurrency limit
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrencyLimit, items.length); i++) {
+    workers.push(processNext());
   }
   
-  // Sort errors by frequency
-  const commonErrors = Object.entries(errorCounts)
-    .map(([message, count]) => ({ message, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5); // Top 5 errors
+  // Wait for all workers to complete
+  await Promise.all(workers);
   
-  return {
-    totalIssues,
-    successCount,
-    failureCount,
-    successRate: Math.round(successRate * 100) / 100, // Round to 2 decimal places
-    repositories,
-    commonErrors
-  };
+  return results;
 }
 
 /**
- * Simplify an error message for categorization
- * @private
- * @param {string} errorMessage - Original error message
- * @returns {string} - Simplified error message
+ * Prioritize issues in a batch
+ * 
+ * @param {Array} issueList - List of issues to prioritize
+ * @returns {Array} - Prioritized issue list
  */
-function simplifyErrorMessage(errorMessage) {
-  if (!errorMessage) return 'Unknown error';
+function prioritizeIssues(issueList) {
+  // Create a copy of the list to avoid modifying the original
+  const issues = [...issueList];
   
-  // Remove specific values like file paths, issue numbers, etc.
-  let simplified = errorMessage
-    .replace(/\/[^\/\s]+\//g, '/path/') // Simplify paths
-    .replace(/#\d+/g, '#XX') // Replace issue numbers
-    .replace(/\d+/g, 'XX') // Replace other numbers
-    .replace(/".+?"/g, '"XXX"') // Replace quoted strings
-    .replace(/'.+?'/g, "'XXX'"); // Replace single-quoted strings
+  // Get priority labels from configuration
+  const configPriorityLabels = (configModule.getConfigSection('task') || {}).priorityLabels || [
+    'critical', 'high-priority', 'priority', 'blocker'
+  ];
   
-  // Truncate to keep only the beginning of the message (the most relevant part)
-  if (simplified.length > 100) {
-    simplified = simplified.substring(0, 100) + '...';
-  }
+  // Sort issues by priority (high to low)
+  issues.sort((a, b) => {
+    // Function to calculate priority score (higher = more urgent)
+    const getPriorityScore = (issue) => {
+      let score = 0;
+      
+      // Check for priority labels
+      if (issue.labels && Array.isArray(issue.labels)) {
+        for (const label of issue.labels) {
+          // Check against configured priority labels
+          const labelIndex = configPriorityLabels.findIndex(
+            pl => typeof label === 'string' ? label.includes(pl) : label.name?.includes(pl)
+          );
+          
+          if (labelIndex >= 0) {
+            // Give higher score to higher priority labels (based on order in the array)
+            score += configPriorityLabels.length - labelIndex;
+          }
+        }
+      }
+      
+      // Age-based priority boost (older issues get higher priority, but less than labels)
+      if (issue.created_at) {
+        const ageInDays = (Date.now() - new Date(issue.created_at).getTime()) / (1000 * 60 * 60 * 24);
+        score += Math.min(ageInDays / 10, 0.5); // Cap at 0.5 extra points for age
+      }
+      
+      return score;
+    };
+    
+    // Compare priority scores
+    return getPriorityScore(b) - getPriorityScore(a);
+  });
   
-  return simplified;
+  return issues;
+}
+
+/**
+ * Create a batch report
+ * 
+ * @param {Array} results - Batch processing results
+ * @returns {Object} - Batch processing report
+ */
+function createBatchReport(results) {
+  const successCount = results.filter(r => r.success).length;
+  const failureCount = results.length - successCount;
+  const successRate = (successCount / results.length) * 100;
+  
+  // Group results by success/failure
+  const successful = results.filter(r => r.success);
+  const failed = results.filter(r => !r.success);
+  
+  // Extract pull request information
+  const pullRequests = successful.map(result => ({
+    issueNumber: result.issueNumber,
+    pullRequestNumber: result.pullRequestNumber,
+    pullRequestUrl: result.pullRequestUrl
+  }));
+  
+  // Extract error information
+  const errors = failed.map(result => ({
+    issueUrl: result.issueUrl,
+    error: result.error
+  }));
+  
+  return {
+    summary: {
+      totalIssues: results.length,
+      successful: successCount,
+      failed: failureCount,
+      successRate: successRate.toFixed(2) + '%'
+    },
+    pullRequests,
+    errors,
+    timestamp: new Date().toISOString()
+  };
 }
 
 module.exports = {
   processBatch,
-  getBatchStatistics
+  prioritizeIssues,
+  createBatchReport
 };

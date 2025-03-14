@@ -1,14 +1,16 @@
 /**
  * Feedback and Visualization Module
+ * 
  * Provides resolution feedback and visualizes outcomes
  */
 
 const logger = require('../../utils/logger');
-const githubApi = require('../github_api');
+const githubModule = require('../github_api');
 const configModule = require('../configuration');
 
 /**
  * Provide feedback on the resolution process
+ * 
  * @param {Object} prResult - Pull request creation result
  * @param {Object} issueData - Data about the GitHub issue
  * @returns {Promise<Object>} - Feedback result
@@ -16,18 +18,18 @@ const configModule = require('../configuration');
 async function provideFeedback(prResult, issueData) {
   try {
     logger.info(`Providing feedback for issue #${issueData.number}`);
-    
+
     // Generate feedback comment
     const comment = generateFeedbackComment(prResult, issueData);
-    
+
     // Post comment to the issue
     const commentResult = await postIssueComment(comment, issueData);
-    
+
     // Remove "fix-me" label if it exists
     await removeFixMeLabel(issueData);
-    
+
     logger.info(`Posted feedback comment to issue #${issueData.number}`);
-    
+
     return {
       commentId: commentResult.id,
       commentUrl: commentResult.url,
@@ -45,6 +47,7 @@ async function provideFeedback(prResult, issueData) {
 
 /**
  * Generate a feedback comment
+ * 
  * @private
  * @param {Object} prResult - Pull request creation result
  * @param {Object} issueData - Data about the GitHub issue
@@ -52,14 +55,14 @@ async function provideFeedback(prResult, issueData) {
  */
 function generateFeedbackComment(prResult, issueData) {
   const { pullRequestNumber, pullRequestUrl, branch } = prResult;
-  
+
   return `## 🤖 OpenHands Resolver
 
 I've created a pull request addressing this issue:
 
 **🔗 [Pull Request #${pullRequestNumber}](${pullRequestUrl})**
 
-The changes were implemented in the branch \`${branch}\`. 
+The changes were implemented in the branch \`${branch}\`.
 
 ### What's Next?
 
@@ -79,6 +82,7 @@ Let me know if you need any clarification or have any questions about the soluti
 
 /**
  * Post a comment to a GitHub issue
+ * 
  * @private
  * @param {string} comment - Comment to post
  * @param {Object} issueData - Data about the GitHub issue
@@ -86,18 +90,16 @@ Let me know if you need any clarification or have any questions about the soluti
  */
 async function postIssueComment(comment, issueData) {
   try {
-    // In a real implementation, this would use the GitHub API to post a comment
-    // For this MVP, we'll simulate the response
-    
     logger.info(`Posting comment to issue #${issueData.number}`);
     
-    // Simulate a successful comment posting
-    return {
-      id: Math.floor(Math.random() * 1000000),
-      url: `${issueData.url}#comment-12345`,
-      body: comment,
-      created_at: new Date().toISOString()
-    };
+    const result = await githubModule.addIssueComment(
+      issueData.owner,
+      issueData.repo,
+      issueData.number,
+      comment
+    );
+    
+    return result;
   } catch (error) {
     logger.error(`Failed to post comment to issue #${issueData.number}:`, error);
     throw new Error(`Failed to post issue comment: ${error.message}`);
@@ -106,6 +108,7 @@ async function postIssueComment(comment, issueData) {
 
 /**
  * Remove the "fix-me" label from an issue
+ * 
  * @private
  * @param {Object} issueData - Data about the GitHub issue
  * @returns {Promise<boolean>} - Success status
@@ -113,19 +116,27 @@ async function postIssueComment(comment, issueData) {
 async function removeFixMeLabel(issueData) {
   try {
     const { owner, repo, number, labels } = issueData;
-    
+
     // Check if "fix-me" label exists
-    if (!labels.includes('fix-me')) {
+    if (!labels || !labels.includes('fix-me')) {
       logger.debug(`Issue #${number} does not have the "fix-me" label, no need to remove`);
       return true;
     }
-    
+
     logger.info(`Removing "fix-me" label from issue #${number}`);
     
-    // In a real implementation, this would use the GitHub API to remove the label
-    // For this MVP, we'll simulate the response
+    // Create a new array of labels without "fix-me"
+    const updatedLabels = labels.filter(label => label !== 'fix-me');
     
-    // Simulate a successful label removal
+    // Update the issue labels
+    await githubModule.updateIssueLabels(
+      owner,
+      repo,
+      number,
+      updatedLabels
+    );
+    
+    logger.info(`Successfully removed "fix-me" label from issue #${number}`);
     return true;
   } catch (error) {
     logger.error(`Failed to remove "fix-me" label from issue #${issueData.number}:`, error);
@@ -135,20 +146,31 @@ async function removeFixMeLabel(issueData) {
 
 /**
  * Create a visualization of the resolution process
+ * 
  * @param {Object} prResult - Pull request creation result
  * @param {Object} issueData - Data about the GitHub issue
  * @param {Object} codeChanges - Generated code changes
  * @returns {Object} - Visualization data
  */
 function createVisualization(prResult, issueData, codeChanges) {
-  // For this MVP, we'll create a simple JSON visualization
-  // In a real implementation, this could generate more complex visualizations
+  // Get the start time if it was recorded, or approximate it
+  const startTime = issueData.processingStartTime || new Date(Date.now() - 300000); // Default to 5 mins ago
+  const endTime = new Date();
   
+  // Calculate resolution time in milliseconds
+  const resolutionTimeMs = endTime.getTime() - startTime.getTime();
+  
+  // Format resolution time as HH:MM:SS
+  const hours = Math.floor(resolutionTimeMs / 3600000);
+  const minutes = Math.floor((resolutionTimeMs % 3600000) / 60000);
+  const seconds = Math.floor((resolutionTimeMs % 60000) / 1000);
+  const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
   const visualizationData = {
     issue: {
       number: issueData.number,
       title: issueData.title,
-      url: issueData.url,
+      url: `https://github.com/${issueData.owner}/${issueData.repo}/issues/${issueData.number}`,
       repository: `${issueData.owner}/${issueData.repo}`
     },
     pullRequest: {
@@ -165,18 +187,20 @@ function createVisualization(prResult, issueData, codeChanges) {
       }))
     },
     timeline: {
-      resolved: new Date().toISOString(),
-      resolutionTime: '00:05:23' // Simulated resolution time
+      started: startTime.toISOString(),
+      resolved: endTime.toISOString(),
+      resolutionTime: formattedTime
     }
   };
-  
+
   logger.debug('Created visualization data for issue resolution');
-  
+
   return visualizationData;
 }
 
 /**
  * Format visualization data as HTML
+ * 
  * @param {Object} visualizationData - Visualization data
  * @returns {string} - HTML representation
  */
@@ -199,25 +223,25 @@ function formatVisualizationAsHtml(visualizationData) {
 </head>
 <body>
   <h1>Issue Resolution Visualization</h1>
-  
+
   <div class="card">
     <h2>Issue</h2>
     <p><strong>#${visualizationData.issue.number}:</strong> ${visualizationData.issue.title}</p>
     <p><a href="${visualizationData.issue.url}" target="_blank">View on GitHub</a></p>
     <p><strong>Repository:</strong> ${visualizationData.issue.repository}</p>
   </div>
-  
+
   <div class="card">
     <h2>Pull Request</h2>
     <p><strong>#${visualizationData.pullRequest.number}</strong></p>
     <p><a href="${visualizationData.pullRequest.url}" target="_blank">View on GitHub</a></p>
     <p><strong>Branch:</strong> ${visualizationData.pullRequest.branch}</p>
   </div>
-  
+
   <div class="card">
     <h2>Code Changes</h2>
     <p><strong>Files Changed:</strong> ${visualizationData.codeChanges.filesChanged}</p>
-    
+
     ${visualizationData.codeChanges.changes.map(change => `
       <div class="file-change">
         <div class="file-path">${change.path}</div>
@@ -225,10 +249,13 @@ function formatVisualizationAsHtml(visualizationData) {
       </div>
     `).join('')}
   </div>
-  
+
   <div class="card">
     <h2>Timeline</h2>
     <div class="timeline">
+      <div>
+        <strong>Started:</strong> ${new Date(visualizationData.timeline.started).toLocaleString()}
+      </div>
       <div>
         <strong>Resolved:</strong> ${new Date(visualizationData.timeline.resolved).toLocaleString()}
       </div>
@@ -244,6 +271,7 @@ function formatVisualizationAsHtml(visualizationData) {
 
 /**
  * Format visualization data as JSON
+ * 
  * @param {Object} visualizationData - Visualization data
  * @returns {string} - JSON representation
  */
@@ -251,9 +279,55 @@ function formatVisualizationAsJson(visualizationData) {
   return JSON.stringify(visualizationData, null, 2);
 }
 
+/**
+ * Format visualization data as Markdown
+ * 
+ * @param {Object} visualizationData - Visualization data
+ * @returns {string} - Markdown representation
+ */
+function formatVisualizationAsMarkdown(visualizationData) {
+  const { issue, pullRequest, codeChanges, timeline } = visualizationData;
+  
+  let markdown = `# Issue Resolution Summary
+
+## Issue
+- **Number:** #${issue.number}
+- **Title:** ${issue.title}
+- **Repository:** ${issue.repository}
+- [View on GitHub](${issue.url})
+
+## Pull Request
+- **Number:** #${pullRequest.number}
+- **Branch:** \`${pullRequest.branch}\`
+- [View on GitHub](${pullRequest.url})
+
+## Code Changes
+- **Files Changed:** ${codeChanges.filesChanged}
+
+`;
+
+  // Add file changes
+  codeChanges.changes.forEach(change => {
+    markdown += `### ${change.path}\n\`\`\`\n${change.contentPreview}\n\`\`\`\n\n`;
+  });
+
+  // Add timeline
+  markdown += `## Timeline
+- **Started:** ${new Date(timeline.started).toLocaleString()}
+- **Resolved:** ${new Date(timeline.resolved).toLocaleString()}
+- **Resolution Time:** ${timeline.resolutionTime}
+
+---
+*Generated by OpenHands Resolver MCP*
+`;
+
+  return markdown;
+}
+
 module.exports = {
   provideFeedback,
   createVisualization,
   formatVisualizationAsHtml,
-  formatVisualizationAsJson
+  formatVisualizationAsJson,
+  formatVisualizationAsMarkdown
 };
