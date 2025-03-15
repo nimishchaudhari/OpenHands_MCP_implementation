@@ -2,15 +2,7 @@
 
 
 
-
-
-
-
  * Configuration Module
-
-
-
-
 
 
 
@@ -18,27 +10,11 @@
 
 
 
-
-
-
-
  * Manages system settings and customizations for the OpenHands Resolver MCP
 
 
 
-
-
-
-
  */
-
-
-
-
-
-
-
-
 
 
 
@@ -50,15 +26,7 @@ const fs = require('fs').promises;
 
 
 
-
-
-
-
 const path = require('path');
-
-
-
-
 
 
 
@@ -70,19 +38,7 @@ const logger = require('../../utils/logger');
 
 
 
-
-
-
-
-
-
-
-
 // Default configuration values
-
-
-
-
 
 
 
@@ -90,15 +46,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   // GitHub API settings
-
-
-
-
 
 
 
@@ -106,15 +54,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     timeout: 10000, // 10 seconds
-
-
-
-
 
 
 
@@ -122,15 +62,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     maxConcurrent: 5
-
-
-
-
 
 
 
@@ -138,23 +70,11 @@ const defaultConfig = {
 
 
 
-
-
-
-
   
 
 
 
-
-
-
-
   // AI model settings
-
-
-
-
 
 
 
@@ -164,25 +84,11 @@ const defaultConfig = {
 
 
 
-
-
-
-
-
-
   },
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -190,15 +96,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   task: {
-
-
-
-
 
 
 
@@ -206,15 +104,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     maxFileSize: 100000, // 100KB max per file
-
-
-
-
 
 
 
@@ -222,23 +112,11 @@ const defaultConfig = {
 
 
 
-
-
-
-
   },
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -246,15 +124,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   pullRequest: {
-
-
-
-
 
 
 
@@ -262,15 +132,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     defaultBaseBranch: '', // Will be read from repository
-
-
-
-
 
 
 
@@ -278,15 +140,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     addLabels: ['ai-assisted'],
-
-
-
-
 
 
 
@@ -294,23 +148,11 @@ const defaultConfig = {
 
 
 
-
-
-
-
   },
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -318,15 +160,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   security: {
-
-
-
-
 
 
 
@@ -334,15 +168,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     validateCodeBeforeCommit: true,
-
-
-
-
 
 
 
@@ -350,23 +176,11 @@ const defaultConfig = {
 
 
 
-
-
-
-
   },
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -374,15 +188,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   batch: {
-
-
-
-
 
 
 
@@ -390,15 +196,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     maxIssuesPerBatch: 10
-
-
-
-
 
 
 
@@ -406,15 +204,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -422,15 +212,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
   debug: {
-
-
-
-
 
 
 
@@ -438,15 +220,7 @@ const defaultConfig = {
 
 
 
-
-
-
-
     saveResponses: false,
-
-
-
-
 
 
 
@@ -454,27 +228,11 @@ const defaultConfig = {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
 };
-
-
-
-
-
-
-
-
 
 
 
@@ -486,10 +244,6 @@ const defaultConfig = {
 
 
 
-
-
-
-
 let currentConfig = { ...defaultConfig };
 
 
@@ -498,19 +252,7 @@ let currentConfig = { ...defaultConfig };
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -518,15 +260,7 @@ let currentConfig = { ...defaultConfig };
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -534,23 +268,11 @@ let currentConfig = { ...defaultConfig };
 
 
 
-
-
-
-
  * @returns {Promise<boolean>} - Success status
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -558,15 +280,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
   try {
-
-
-
-
 
 
 
@@ -574,15 +288,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -590,23 +296,11 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     currentConfig = { ...defaultConfig };
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -614,15 +308,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     if (configPath) {
-
-
-
-
 
 
 
@@ -630,15 +316,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
       mergeConfig(loadedConfig);
-
-
-
-
 
 
 
@@ -646,23 +324,11 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     }
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -670,15 +336,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     loadFromEnvironment();
-
-
-
-
 
 
 
@@ -686,15 +344,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -702,15 +352,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     const validation = validateConfig(currentConfig);
-
-
-
-
 
 
 
@@ -718,15 +360,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
       throw new Error(`Configuration validation failed: ${validation.errors.join(', ')}`);
-
-
-
-
 
 
 
@@ -734,15 +368,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -750,23 +376,11 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     return true;
 
 
 
-
-
-
-
   } catch (error) {
-
-
-
-
 
 
 
@@ -774,23 +388,11 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
     return false;
 
 
 
-
-
-
-
   }
-
-
-
-
 
 
 
@@ -802,19 +404,7 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -822,23 +412,11 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
  * 
 
 
 
-
-
-
-
  * @private
-
-
-
-
 
 
 
@@ -846,23 +424,11 @@ async function initialize(configPath) {
 
 
 
-
-
-
-
  * @returns {Promise<Object>} - Loaded configuration
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -870,15 +436,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
   try {
-
-
-
-
 
 
 
@@ -886,15 +444,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
     const stats = await fs.stat(configPath);
-
-
-
-
 
 
 
@@ -902,15 +452,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
       throw new Error(`Configuration path is not a file: ${configPath}`);
-
-
-
-
 
 
 
@@ -918,15 +460,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -934,23 +468,11 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
     const content = await fs.readFile(configPath, 'utf-8');
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -958,15 +480,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
     if (configPath.endsWith('.json')) {
-
-
-
-
 
 
 
@@ -974,15 +488,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
     } else if (configPath.endsWith('.js')) {
-
-
-
-
 
 
 
@@ -990,15 +496,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
       return require(path.resolve(configPath));
-
-
-
-
 
 
 
@@ -1006,15 +504,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
       throw new Error(`Unsupported configuration file type: ${configPath}`);
-
-
-
-
 
 
 
@@ -1022,15 +512,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
   } catch (error) {
-
-
-
-
 
 
 
@@ -1038,15 +520,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
   }
-
-
-
-
 
 
 
@@ -1058,19 +532,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -1078,15 +540,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -1094,15 +548,7 @@ async function loadConfigFromFile(configPath) {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -1110,15 +556,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   // GitHub token
-
-
-
-
 
 
 
@@ -1126,15 +564,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
     logger.debug('Found GitHub token in environment');
-
-
-
-
 
 
 
@@ -1142,15 +572,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
     logger.warn('No GitHub token found in environment, API calls may fail');
-
-
-
-
 
 
 
@@ -1158,15 +580,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1174,20 +588,23 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   
 
 
 
+  if (process.env.AI_TEMPERATURE) {
 
 
 
+    const temp = parseFloat(process.env.AI_TEMPERATURE);
 
 
 
+    if (!isNaN(temp)) {
+
+
+
+      currentConfig.ai.temperature = temp;
 
 
 
@@ -1195,23 +612,11 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1219,15 +624,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
     const tokens = parseInt(process.env.AI_MAX_TOKENS, 10);
-
-
-
-
 
 
 
@@ -1235,15 +632,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
       currentConfig.ai.maxTokens = tokens;
-
-
-
-
 
 
 
@@ -1251,23 +640,11 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1275,15 +652,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   if (process.env.DEBUG_MODE === 'true') {
-
-
-
-
 
 
 
@@ -1291,15 +660,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
     currentConfig.debug.verboseLogging = true;
-
-
-
-
 
 
 
@@ -1307,15 +668,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1323,15 +676,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   if (process.env.PR_AS_DRAFT === 'false') {
-
-
-
-
 
 
 
@@ -1339,23 +684,11 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1363,15 +696,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
   if (process.env.MAX_CONCURRENT_ISSUES) {
-
-
-
-
 
 
 
@@ -1379,15 +704,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
     if (!isNaN(max)) {
-
-
-
-
 
 
 
@@ -1395,23 +712,11 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
     }
 
 
 
-
-
-
-
   }
-
-
-
-
 
 
 
@@ -1423,19 +728,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -1443,23 +736,11 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
  * 
 
 
 
-
-
-
-
  * @private
-
-
-
-
 
 
 
@@ -1467,15 +748,7 @@ function loadFromEnvironment() {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -1483,23 +756,11 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
   if (!newConfig) return;
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1507,15 +768,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
   function deepMerge(target, source) {
-
-
-
-
 
 
 
@@ -1523,15 +776,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
       if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-
-
-
-
 
 
 
@@ -1539,15 +784,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
         deepMerge(target[key], source[key]);
-
-
-
-
 
 
 
@@ -1555,15 +792,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
         target[key] = source[key];
-
-
-
-
 
 
 
@@ -1571,15 +800,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
     }
-
-
-
-
 
 
 
@@ -1587,15 +808,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1603,10 +816,6 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
 }
 
 
@@ -1615,19 +824,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -1635,15 +832,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -1651,15 +840,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
  * @param {Object} config - Configuration to validate
-
-
-
-
 
 
 
@@ -1667,15 +848,7 @@ function mergeConfig(newConfig) {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -1683,23 +856,11 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   const errors = [];
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1707,15 +868,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   if (!config.ai || !config.ai.model) {
-
-
-
-
 
 
 
@@ -1723,23 +876,11 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1747,15 +888,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
     errors.push('AI temperature must be between 0 and 1');
-
-
-
-
 
 
 
@@ -1763,15 +896,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1779,15 +904,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
     errors.push('AI maxTokens must be between 100 and 10000');
-
-
-
-
 
 
 
@@ -1795,15 +912,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1811,15 +920,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   if (config.batch.maxConcurrent < 1) {
-
-
-
-
 
 
 
@@ -1827,23 +928,11 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1851,15 +940,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
     errors.push('Batch maxIssuesPerBatch must be at least 1');
-
-
-
-
 
 
 
@@ -1867,15 +948,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -1883,15 +956,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   if (!config.security.tokenEnvName) {
-
-
-
-
 
 
 
@@ -1899,15 +964,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   }
-
-
-
-
 
 
 
@@ -1915,15 +972,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
   return {
-
-
-
-
 
 
 
@@ -1931,23 +980,11 @@ function validateConfig(config) {
 
 
 
-
-
-
-
     errors
 
 
 
-
-
-
-
   };
-
-
-
-
 
 
 
@@ -1959,19 +996,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -1979,15 +1004,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -1995,15 +1012,7 @@ function validateConfig(config) {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -2011,15 +1020,7 @@ function getConfig() {
 
 
 
-
-
-
-
   return { ...currentConfig };
-
-
-
-
 
 
 
@@ -2031,19 +1032,7 @@ function getConfig() {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -2051,15 +1040,7 @@ function getConfig() {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -2067,23 +1048,11 @@ function getConfig() {
 
 
 
-
-
-
-
  * @returns {Object|null} - Configuration section or null if not found
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -2091,15 +1060,7 @@ function getConfigSection(section) {
 
 
 
-
-
-
-
   return currentConfig[section] ? { ...currentConfig[section] } : null;
-
-
-
-
 
 
 
@@ -2111,19 +1072,7 @@ function getConfigSection(section) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -2131,15 +1080,7 @@ function getConfigSection(section) {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -2147,15 +1088,7 @@ function getConfigSection(section) {
 
 
 
-
-
-
-
  * @param {any} value - New value
-
-
-
-
 
 
 
@@ -2163,15 +1096,7 @@ function getConfigSection(section) {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -2179,15 +1104,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
   try {
-
-
-
-
 
 
 
@@ -2195,15 +1112,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     const parts = key.split('.');
-
-
-
-
 
 
 
@@ -2211,15 +1120,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -2227,15 +1128,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     for (let i = 0; i < parts.length - 1; i++) {
-
-
-
-
 
 
 
@@ -2243,15 +1136,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
       if (!current[part]) {
-
-
-
-
 
 
 
@@ -2259,15 +1144,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
       }
-
-
-
-
 
 
 
@@ -2275,23 +1152,11 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     }
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -2299,23 +1164,11 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     current[parts[parts.length - 1]] = value;
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -2323,23 +1176,11 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     return true;
 
 
 
-
-
-
-
   } catch (error) {
-
-
-
-
 
 
 
@@ -2347,23 +1188,11 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
     return false;
 
 
 
-
-
-
-
   }
-
-
-
-
 
 
 
@@ -2375,19 +1204,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -2395,15 +1212,7 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -2411,23 +1220,11 @@ function updateConfig(key, value) {
 
 
 
-
-
-
-
  * @returns {Promise<boolean>} - Success status
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -2435,15 +1232,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
   try {
-
-
-
-
 
 
 
@@ -2451,23 +1240,11 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     const configToSave = { ...currentConfig };
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -2475,15 +1252,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     if (configToSave.security) {
-
-
-
-
 
 
 
@@ -2491,15 +1260,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
       delete configToSave.security.credentials;
-
-
-
-
 
 
 
@@ -2507,15 +1268,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -2523,23 +1276,11 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     const configJson = JSON.stringify(configToSave, null, 2);
 
 
 
-
-
-
-
     
-
-
-
-
 
 
 
@@ -2547,15 +1288,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     await fs.writeFile(filePath, configJson, 'utf-8');
-
-
-
-
 
 
 
@@ -2563,15 +1296,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     logger.info(`Configuration saved to ${filePath}`);
-
-
-
-
 
 
 
@@ -2579,15 +1304,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
   } catch (error) {
-
-
-
-
 
 
 
@@ -2595,23 +1312,11 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
     return false;
 
 
 
-
-
-
-
   }
-
-
-
-
 
 
 
@@ -2623,19 +1328,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -2643,15 +1336,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -2659,15 +1344,7 @@ async function saveConfigToFile(filePath) {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -2675,15 +1352,7 @@ function getGitHubToken() {
 
 
 
-
-
-
-
   const tokenEnvName = currentConfig.security.tokenEnvName || 'GITHUB_TOKEN';
-
-
-
-
 
 
 
@@ -2691,15 +1360,7 @@ function getGitHubToken() {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -2707,15 +1368,7 @@ function getGitHubToken() {
 
 
 
-
-
-
-
     logger.warn(`GitHub token not found in environment variable ${tokenEnvName}`);
-
-
-
-
 
 
 
@@ -2723,23 +1376,11 @@ function getGitHubToken() {
 
 
 
-
-
-
-
   }
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -2747,10 +1388,6 @@ function getGitHubToken() {
 
 
 
-
-
-
-
 }
 
 
@@ -2759,19 +1396,7 @@ function getGitHubToken() {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -2779,15 +1404,7 @@ function getGitHubToken() {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -2795,15 +1412,7 @@ function getGitHubToken() {
 
 
 
-
-
-
-
  */
-
-
-
-
 
 
 
@@ -2811,15 +1420,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
   return {
-
-
-
-
 
 
 
@@ -2827,15 +1428,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
     temperature: currentConfig.ai.temperature,
-
-
-
-
 
 
 
@@ -2843,15 +1436,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
     systemMessage: currentConfig.ai.systemMessage
-
-
-
-
 
 
 
@@ -2859,10 +1444,6 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
 }
 
 
@@ -2871,19 +1452,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
-
-
-
-
 /**
-
-
-
-
 
 
 
@@ -2891,15 +1460,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
  * 
-
-
-
-
 
 
 
@@ -2907,15 +1468,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
  * @returns {boolean} - Whether the file type is allowed
-
-
-
-
 
 
 
@@ -2923,15 +1476,7 @@ function getClaudeConfig() {
 
 
 
-
-
-
-
 function isFileTypeAllowed(filename) {
-
-
-
-
 
 
 
@@ -2939,15 +1484,7 @@ function isFileTypeAllowed(filename) {
 
 
 
-
-
-
-
   
-
-
-
-
 
 
 
@@ -2955,15 +1492,7 @@ function isFileTypeAllowed(filename) {
 
 
 
-
-
-
-
   const allowedTypes = currentConfig.security.allowedFileTypes || [];
-
-
-
-
 
 
 
@@ -2971,27 +1500,11 @@ function isFileTypeAllowed(filename) {
 
 
 
-
-
-
-
   return allowedTypes.includes(extension);
 
 
 
-
-
-
-
 }
-
-
-
-
-
-
-
-
 
 
 
@@ -3003,15 +1516,7 @@ function isFileTypeAllowed(filename) {
 
 
 
-
-
-
-
  * Reset configuration to defaults
-
-
-
-
 
 
 
@@ -3019,15 +1524,7 @@ function isFileTypeAllowed(filename) {
 
 
 
-
-
-
-
 function resetToDefaults() {
-
-
-
-
 
 
 
@@ -3035,27 +1532,11 @@ function resetToDefaults() {
 
 
 
-
-
-
-
   logger.info('Configuration reset to defaults');
 
 
 
-
-
-
-
 }
-
-
-
-
-
-
-
-
 
 
 
@@ -3067,15 +1548,7 @@ module.exports = {
 
 
 
-
-
-
-
   initialize,
-
-
-
-
 
 
 
@@ -3083,15 +1556,7 @@ module.exports = {
 
 
 
-
-
-
-
   getConfigSection,
-
-
-
-
 
 
 
@@ -3099,15 +1564,7 @@ module.exports = {
 
 
 
-
-
-
-
   saveConfigToFile,
-
-
-
-
 
 
 
@@ -3115,15 +1572,7 @@ module.exports = {
 
 
 
-
-
-
-
   getClaudeConfig,
-
-
-
-
 
 
 
@@ -3131,19 +1580,9 @@ module.exports = {
 
 
 
-
-
-
-
   resetToDefaults
 
 
 
-
-
-
-
 };
-
-
 
