@@ -1,196 +1,345 @@
-/**
- * Batch Processing Module
- * 
- * Resolves multiple issues concurrently
- */
-
-const logger = require('../../utils/logger');
-const configModule = require('../configuration');
-
-/**
- * Process a batch of GitHub issues
- * 
- * @param {Array} issueList - List of issue objects with issueUrl, owner, repo, issueNumber
- * @param {Function} resolveFn - Function to resolve a single issue
- * @returns {Promise<Array>} - Results for each issue
- */
-async function processBatch(issueList, resolveFn) {
-  if (!Array.isArray(issueList) || issueList.length === 0) {
-    throw new Error('Invalid or empty issue list for batch processing');
-  }
-  
-  logger.info(`Starting batch processing for ${issueList.length} issues`);
-  
-  // Get batch configuration
-  const batchConfig = configModule.getConfigSection('batch') || {};
-  const maxConcurrent = batchConfig.maxConcurrent || 3;
-  const maxIssuesPerBatch = batchConfig.maxIssuesPerBatch || 10;
-  
-  // Limit the number of issues to process
-  const limitedIssueList = issueList.slice(0, maxIssuesPerBatch);
-  if (limitedIssueList.length < issueList.length) {
-    logger.warn(`Limiting batch to ${maxIssuesPerBatch} issues (${issueList.length} provided)`);
-  }
-  
-  // Process issues with concurrency limit
-  const results = await processWithConcurrencyLimit(limitedIssueList, resolveFn, maxConcurrent);
-  
-  // Log batch processing results
-  const successCount = results.filter(result => result.success).length;
-  logger.info(`Batch processing completed: ${successCount}/${results.length} issues resolved successfully`);
-  
-  return results;
-}
-
-/**
- * Process a list of items with a concurrency limit
- * 
- * @private
- * @param {Array} items - List of items to process
- * @param {Function} processFn - Function to process a single item
- * @param {number} concurrencyLimit - Maximum number of concurrent operations
- * @returns {Promise<Array>} - Results for each item
- */
-async function processWithConcurrencyLimit(items, processFn, concurrencyLimit) {
-  const results = new Array(items.length);
-  let currentIndex = 0;
-  
-  // Function to process the next item
-  async function processNext() {
-    const index = currentIndex++;
-    if (index >= items.length) return;
-    
-    try {
-      // Process the item and store the result
-      const item = items[index];
-      logger.debug(`Processing batch item ${index + 1}/${items.length}: ${JSON.stringify(item)}`);
-      
-      results[index] = await processFn(item);
-      
-      // Log success status
-      const success = results[index].success;
-      logger.debug(`Item ${index + 1} processed: ${success ? 'success' : 'failure'}`);
-    } catch (error) {
-      // Store error result
-      logger.error(`Error processing batch item ${index + 1}:`, error);
-      results[index] = {
-        success: false,
-        error: error.message,
-        issueUrl: items[index].issueUrl
-      };
-    }
-    
-    // Process next item
-    return processNext();
-  }
-  
-  // Start processing with concurrency limit
-  const workers = [];
-  for (let i = 0; i < Math.min(concurrencyLimit, items.length); i++) {
-    workers.push(processNext());
-  }
-  
-  // Wait for all workers to complete
-  await Promise.all(workers);
-  
-  return results;
-}
-
-/**
- * Prioritize issues in a batch
- * 
- * @param {Array} issueList - List of issues to prioritize
- * @returns {Array} - Prioritized issue list
- */
-function prioritizeIssues(issueList) {
-  // Create a copy of the list to avoid modifying the original
-  const issues = [...issueList];
-  
-  // Get priority labels from configuration
-  const configPriorityLabels = (configModule.getConfigSection('task') || {}).priorityLabels || [
-    'critical', 'high-priority', 'priority', 'blocker'
-  ];
-  
-  // Sort issues by priority (high to low)
-  issues.sort((a, b) => {
-    // Function to calculate priority score (higher = more urgent)
-    const getPriorityScore = (issue) => {
-      let score = 0;
-      
-      // Check for priority labels
-      if (issue.labels && Array.isArray(issue.labels)) {
-        for (const label of issue.labels) {
-          // Check against configured priority labels
-          const labelIndex = configPriorityLabels.findIndex(
-            pl => typeof label === 'string' ? label.includes(pl) : label.name?.includes(pl)
-          );
-          
-          if (labelIndex >= 0) {
-            // Give higher score to higher priority labels (based on order in the array)
-            score += configPriorityLabels.length - labelIndex;
-          }
-        }
-      }
-      
-      // Age-based priority boost (older issues get higher priority, but less than labels)
-      if (issue.created_at) {
-        const ageInDays = (Date.now() - new Date(issue.created_at).getTime()) / (1000 * 60 * 60 * 24);
-        score += Math.min(ageInDays / 10, 0.5); // Cap at 0.5 extra points for age
-      }
-      
-      return score;
-    };
-    
-    // Compare priority scores
-    return getPriorityScore(b) - getPriorityScore(a);
-  });
-  
-  return issues;
-}
-
-/**
- * Create a batch report
- * 
- * @param {Array} results - Batch processing results
- * @returns {Object} - Batch processing report
- */
-function createBatchReport(results) {
-  const successCount = results.filter(r => r.success).length;
-  const failureCount = results.length - successCount;
-  const successRate = (successCount / results.length) * 100;
-  
-  // Group results by success/failure
-  const successful = results.filter(r => r.success);
-  const failed = results.filter(r => !r.success);
-  
-  // Extract pull request information
-  const pullRequests = successful.map(result => ({
-    issueNumber: result.issueNumber,
-    pullRequestNumber: result.pullRequestNumber,
-    pullRequestUrl: result.pullRequestUrl
-  }));
-  
-  // Extract error information
-  const errors = failed.map(result => ({
-    issueUrl: result.issueUrl,
-    error: result.error
-  }));
-  
-  return {
-    summary: {
-      totalIssues: results.length,
-      successful: successCount,
-      failed: failureCount,
-      successRate: successRate.toFixed(2) + '%'
-    },
-    pullRequests,
-    errors,
-    timestamp: new Date().toISOString()
-  };
-}
-
-module.exports = {
-  processBatch,
-  prioritizeIssues,
-  createBatchReport
+/**
+ * OpenHands Resolver MCP - Batch Processing Module
+ * 
+ * This module enables concurrent resolution of multiple GitHub issues:
+ * - Processes batches of issues with prioritization
+ * - Manages parallelism and throttling to respect API limits
+ * - Tracks and reports on batch processing status
+ */
+
+import { getContextLogger } from '../../utils/logger.js';
+import { getConfig } from '../configuration/index.js';
+
+const logger = getContextLogger('BatchProcessing');
+
+/**
+ * Process a batch of GitHub issues
+ * @param {Array} issueList - List of issue URLs or identifiers
+a * @param {Function} resolveFunction - Function for resolving individual issues
+ * @returns {Promise<Array>} - Results for each issue
+ */
+export async function processBatch(issueList, resolveFunction) {
+  try {
+    logger.info(`Processing batch of ${issueList.length} issues`);
+    
+    // Validate inputs
+    if (!Array.isArray(issueList) || issueList.length === 0) {
+      throw new Error('Invalid issue list: must be a non-empty array');
+    }
+    
+    if (typeof resolveFunction !== 'function') {
+      throw new Error('Invalid resolve function: must be a function');
+    }
+    
+    // Prioritize issues
+    const prioritizedIssues = prioritizeIssues(issueList);
+    logger.debug(`Prioritized ${prioritizedIssues.length} issues for batch processing`);
+    
+    // Get batch processing configuration
+    const maxConcurrent = getConfig('github').maxConcurrent || 3;
+    logger.debug(`Using max concurrent limit of ${maxConcurrent}`);
+    
+    // Process issues with throttling
+    const results = await processIssuesWithThrottling(
+      prioritizedIssues,
+      resolveFunction,
+      maxConcurrent
+    );
+    
+    // Generate batch summary
+    const summary = generateBatchSummary(results);
+    logger.info(`Batch processing completed: ${summary.succeeded} succeeded, ${summary.failed} failed`);
+    
+    return results;
+  } catch (error) {
+    logger.error('Error processing issue batch:', error);
+    throw error;
+  }
+}
+
+/**
+ * Prioritize issues based on labels, age, or other factors
+ * @param {Array} issueList - List of issue identifiers
+ * @returns {Array} - Prioritized list of issues
+ */
+function prioritizeIssues(issueList) {
+  try {
+    // Create a copy of the issues for prioritization
+    const issues = [...issueList];
+    
+    // Score issues for priority (higher score = higher priority)
+    const scoredIssues = issues.map(issue => {
+      let score = 0;
+      
+      // Priority based on labels
+      if (issue.labels && Array.isArray(issue.labels)) {
+        // Higher score for priority labels
+        const priorityLabels = ['high-priority', 'priority', 'critical', 'urgent'];
+        for (const label of issue.labels) {
+          if (priorityLabels.includes(label)) {
+            score += 10;
+          }
+        }
+        
+        // Higher score for bug labels
+        if (issue.labels.includes('bug')) {
+          score += 5;
+        }
+      }
+      
+      // Add some randomness for equal-priority items
+      score += Math.random();
+      
+      return {
+        ...issue,
+        priorityScore: score
+      };
+    });
+    
+    // Sort by priority score (descending)
+    scoredIssues.sort((a, b) => b.priorityScore - a.priorityScore);
+    
+    return scoredIssues;
+  } catch (error) {
+    logger.error('Error prioritizing issues:', error);
+    return issueList;
+  }
+}
+
+/**
+ * Process issues with throttling to respect API limits
+ * @param {Array} issues - Prioritized list of issues
+ * @param {Function} resolveFunction - Function for resolving individual issues
+ * @param {number} maxConcurrent - Maximum number of concurrent operations
+ * @returns {Promise<Array>} - Results for each issue
+ */
+async function processIssuesWithThrottling(issues, resolveFunction, maxConcurrent) {
+  try {
+    logger.debug(`Processing ${issues.length} issues with max concurrency of ${maxConcurrent}`);
+    
+    const results = [];
+    let activePromises = [];
+    let index = 0;
+    
+    // Process issues in batches based on max concurrency
+    while (index < issues.length) {
+      // Fill up to max concurrent
+      while (activePromises.length < maxConcurrent && index < issues.length) {
+        const issue = issues[index];
+        
+        // Create a promise that includes the issue index for tracking
+        const promise = (async () => {
+          try {
+            logger.debug(`Starting resolution for issue at index ${index}`);
+            const result = await resolveFunction(issue);
+            return {
+              originalIndex: index,
+              issue,
+              result,
+              success: true
+            };
+          } catch (error) {
+            logger.error(`Error resolving issue at index ${index}:`, error);
+            return {
+              originalIndex: index,
+              issue,
+              error: error.message,
+              success: false
+            };
+          }
+        })();
+        
+        activePromises.push(promise);
+        index++;
+      }
+      
+      // Wait for any promise to complete
+      if (activePromises.length > 0) {
+        const completedPromise = await Promise.race(
+          activePromises.map((promise, i) => 
+            promise.then(result => ({ result, index: i }))
+          )
+        );
+        
+        // Store the result
+        results.push(completedPromise.result);
+        
+        // Remove the completed promise
+        activePromises.splice(completedPromise.index, 1);
+        
+        // Add a small delay to avoid overwhelming the API
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    // Wait for any remaining promises
+    if (activePromises.length > 0) {
+      logger.debug(`Waiting for ${activePromises.length} remaining promises`);
+      const remainingResults = await Promise.all(activePromises);
+      results.push(...remainingResults);
+    }
+    
+    // Sort results back into original order
+    results.sort((a, b) => a.originalIndex - b.originalIndex);
+    
+    return results;
+  } catch (error) {
+    logger.error('Error in batch processing with throttling:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate a summary of batch processing results
+ * @param {Array} results - Batch processing results
+ * @returns {Object} - Summary statistics
+ */
+function generateBatchSummary(results) {
+  try {
+    // Count successes and failures
+    const succeeded = results.filter(result => result.success).length;
+    const failed = results.length - succeeded;
+    
+    // Group failures by error message
+    const errorGroups = {};
+    for (const result of results) {
+      if (!result.success && result.error) {
+        errorGroups[result.error] = (errorGroups[result.error] || 0) + 1;
+      }
+    }
+    
+    // Sort error groups by frequency (descending)
+    const sortedErrorGroups = Object.entries(errorGroups)
+      .sort((a, b) => b[1] - a[1])
+      .map(([message, count]) => ({ message, count }));
+    
+    return {
+      total: results.length,
+      succeeded,
+      failed,
+      successRate: `${Math.round((succeeded / results.length) * 100)}%`,
+      errorGroups: sortedErrorGroups
+    };
+  } catch (error) {
+    logger.error('Error generating batch summary:', error);
+    return {
+      total: results.length,
+      succeeded: 0,
+      failed: results.length,
+      successRate: '0%',
+      errorGroups: [{ message: 'Error generating summary', count: 1 }]
+    };
+  }
+}
+
+/**
+ * Create a visualization for batch processing results
+ * @param {Array} results - Batch processing results
+ * @returns {Object} - Visualization data
+ */
+export function createBatchVisualization(results) {
+  try {
+    logger.debug('Creating batch processing visualization');
+    
+    // Generate batch summary
+    const summary = generateBatchSummary(results);
+    
+    // Create JSON visualization
+    const jsonVisualization = {
+      batch: {
+        totalIssues: results.length,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+        successRate: summary.successRate
+      },
+      results: results.map(result => ({
+        issue: {
+          issueUrl: result.issue.issueUrl,
+          issueNumber: result.issue.issueNumber,
+          owner: result.issue.owner,
+          repo: result.issue.repo
+        },
+        success: result.success,
+        error: result.error || null,
+        pullRequest: result.success ? {
+          url: result.result.pullRequestUrl,
+          number: result.result.pullRequestNumber
+        } : null
+      })),
+      errors: summary.errorGroups
+    };
+    
+    // Create Markdown visualization
+    const markdownVisualization = createBatchMarkdownVisualization(results, summary);
+    
+    return {
+      json: jsonVisualization,
+      markdown: markdownVisualization
+    };
+  } catch (error) {
+    logger.error('Error creating batch visualization:', error);
+    
+    // Return minimal visualization on error
+    return {
+      json: {
+        error: error.message,
+        batch: { totalIssues: results.length }
+      },
+      markdown: `## ⚠️ Error creating batch visualization\n\n${error.message}`
+    };
+  }
+}
+
+/**
+ * Create a Markdown visualization for batch results
+ * @param {Array} results - Batch processing results
+ * @param {Object} summary - Batch summary
+ * @returns {string} - Markdown text
+ */
+function createBatchMarkdownVisualization(results, summary) {
+  return `
+# 🤖 OpenHands Resolver Batch Summary
+
+## Overview
+- **Total Issues**: ${summary.total}
+- **Succeeded**: ${summary.succeeded} (${summary.successRate})
+- **Failed**: ${summary.failed}
+
+## Results
+
+| Issue | Status | Pull Request |
+|-------|--------|-------------|
+${results.map(result => 
+  `| ${result.issue.issueUrl ? `[#${result.issue.issueNumber}](${result.issue.issueUrl})` : `#${result.issue.issueNumber}`} | ${result.success ? '✅ Success' : '❌ Failed'} | ${result.success ? `[#${result.result.pullRequestNumber}](${result.result.pullRequestUrl})` : 'N/A'} |`
+).join('\n')}
+
+${summary.failed > 0 ? `
+## Error Summary
+
+${summary.errorGroups.map(group => 
+  `- **${group.message}**: ${group.count} issue${group.count !== 1 ? 's' : ''}`
+).join('\n')}
+` : ''}
+
+---
+Generated at ${new Date().toISOString()}
+`;
+}
+
+/**
+ * Check if an issue is currently being processed in a batch
+ * @param {string} issueUrl - Issue URL to check
+ * @returns {boolean} - Whether the issue is being processed
+ */
+export function isIssueInProcess(issueUrl) {
+  // In a full implementation, this would track in-process issues
+  // This is a placeholder implementation
+  return false;
+}
+
+// Export additional functions
+export default {
+  processBatch,
+  createBatchVisualization,
+  isIssueInProcess
 };
