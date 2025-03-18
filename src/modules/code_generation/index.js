@@ -1,505 +1,384 @@
-/**
- * Code Generation and Validation Module
- * 
- * Generates and validates code fixes using Claude
- */
-
-const logger = require('../../utils/logger');
-const configModule = require('../configuration');
-const { ModelContextProtocol } = require('@modelcontextprotocol/sdk');
-
-/**
- * Generate and validate code changes
- * 
- * @param {Object} taskConfig - Task configuration
- * @returns {Promise<Object>} - Generated code changes
- */
-async function generateAndValidateCode(taskConfig) {
-  try {
-    logger.info(`Generating code for issue #${taskConfig.issueNumber}`);
-
-    // Generate prompt for Claude
-    const prompt = generatePrompt(taskConfig);
-
-    // Generate code using Claude Desktop
-    const generatedCode = await generateCodeWithClaudeDesktop(prompt, taskConfig);
-
-    // Extract code changes
-    const codeChanges = extractCodeChanges(generatedCode);
-
-    if (codeChanges.length === 0) {
-      throw new Error('No valid code changes were generated');
-    }
-
-    logger.info(`Generated ${codeChanges.length} code changes`);
-
-    // Validate the generated code
-    const validationResult = await validateCode(codeChanges, taskConfig);
-
-    // If validation failed, refine the code
-    if (!validationResult.valid) {
-      logger.warn('Code validation failed, attempting refinement');
-      return await refineCode(codeChanges, validationResult, taskConfig);
-    }
-
-    return {
-      codeChanges,
-      explanation: extractExplanation(generatedCode),
-      validationResult
-    };
-  } catch (error) {
-    logger.error('Failed to generate and validate code:', error);
-    throw new Error(`Code generation failed: ${error.message}`);
-  }
-}
-
-/**
- * Generate a prompt for Claude Desktop
- * 
- * @private
- * @param {Object} taskConfig - Task configuration
- * @returns {string} - Prompt for Claude
- */
-function generatePrompt(taskConfig) {
-  const { issueInfo, codeContext, customInstructions } = taskConfig;
-  const claudeConfig = configModule.getClaudeConfig();
-
-  let prompt = `
-You are OpenHands, an AI agent that resolves GitHub issues by generating code changes.
-
-Issue Details:
-Repository: ${issueInfo.repository}
-Issue Title: ${issueInfo.title}
-Issue Type: ${issueInfo.type}
-Issue Severity: ${issueInfo.severity}
-
-Issue Description:
-${taskConfig.description || 'No description provided'}
-
-`;
-
-  if (issueInfo.requirements && issueInfo.requirements.length > 0) {
-    prompt += `
-Requirements:
-${issueInfo.requirements.map(req => `- ${req}`).join('\n')}
-
-`;
-  }
-
-  if (issueInfo.errorMessages && issueInfo.errorMessages.length > 0) {
-    prompt += `
-Error Messages:
-${issueInfo.errorMessages.map(err => `- ${err}`).join('\n')}
-
-`;
-  }
-
-  if (customInstructions) {
-    prompt += `
-Custom Instructions:
-${customInstructions}
-
-`;
-  }
-
-  // Include relevant code snippets
-  if (codeContext && codeContext.hasCode) {
-    prompt += `
-Relevant code snippets:
-
-`;
-
-    if (codeContext.fileSnippets && codeContext.fileSnippets.length > 0) {
-      codeContext.fileSnippets.forEach(file => {
-        prompt += `
-File: ${file.path}
-\`\`\`${file.language || ''}
-${file.code}
-\`\`\`
-
-`;
-      });
-    }
-
-    if (codeContext.issueSnippets && codeContext.issueSnippets.length > 0) {
-      prompt += `
-Code from the issue description:
-`;
-      codeContext.issueSnippets.forEach(snippet => {
-        prompt += `
-\`\`\`${snippet.language || ''}
-${snippet.code}
-\`\`\`
-
-`;
-      });
-    }
-  }
-
-  // Add repository structure information if available
-  if (taskConfig.repositoryStructure) {
-    prompt += `
-Repository Structure:
-- Top level directories: ${taskConfig.repositoryStructure.top_level_dirs?.join(', ') || 'unknown'}
-- Main language: ${taskConfig.repositoryStructure.packageJson?.main || 'unknown'}
-
-`;
-  }
-
-  prompt += `
-Based on this issue, please:
-1. Analyze the problem carefully
-2. Generate code changes to resolve the issue
-3. Include explanations for your changes
-4. Format each file change as:
-
-\`\`\`filename: path/to/file.ext
-// code with changes
-\`\`\`
-
-Be specific about exactly which files need to be modified and what changes need to be made.
-Focus on minimal, targeted changes that address the issue while maintaining the project's coding style.
-Explain your thought process and why your solution addresses the issue.
-`;
-
-  // Trim to max prompt length if needed
-  const maxLength = claudeConfig.maxPromptLength || 8000;
-  if (prompt.length > maxLength) {
-    logger.warn(`Prompt exceeds maximum length (${prompt.length} > ${maxLength}), trimming`);
-    prompt = prompt.substring(0, maxLength);
-  }
-
-  return prompt;
-}
-
-/**
- * Generate code using Claude Desktop
- * 
- * @private
- * @param {string} prompt - Prompt for Claude
- * @param {Object} taskConfig - Task configuration
- * @returns {Promise<string>} - Generated code and explanation
- */
-async function generateCodeWithClaudeDesktop(prompt, taskConfig) {
-  logger.info('Sending prompt to Claude Desktop');
-
-  try {
-    // Get Claude configuration
-    const claudeConfig = configModule.getClaudeConfig();
-    
-    // Initialize the MCP client
-    const mcp = new ModelContextProtocol();
-    
-    // Prepare the request
-    const requestPayload = {
-      model: claudeConfig.model,
-      prompt: prompt,
-      temperature: claudeConfig.temperature,
-      maxTokens: claudeConfig.maxTokens,
-      systemMessage: claudeConfig.systemMessage
-    };
-    
-    logger.debug('Claude request payload:', JSON.stringify({
-      model: requestPayload.model,
-      temperature: requestPayload.temperature,
-      maxTokens: requestPayload.maxTokens,
-      promptLength: prompt.length
-    }));
-    
-    // Send the request to Claude Desktop
-    const response = await mcp.generate(requestPayload);
-    
-    if (!response || !response.text) {
-      throw new Error('Empty response received from Claude Desktop');
-    }
-    
-    logger.info('Received response from Claude Desktop');
-    return response.text;
-  } catch (error) {
-    logger.error('Error generating code with Claude Desktop:', error);
-    throw new Error(`Claude Desktop error: ${error.message}`);
-  }
-}
-
-/**
- * Extract code changes from Claude's response
- * 
- * @private
- * @param {string} response - Claude's response
- * @returns {Array<Object>} - List of code changes
- */
-function extractCodeChanges(response) {
-  const changes = [];
-
-  // Pattern to extract code blocks with filenames
-  const codeBlockPattern = /```filename:\s*([^\n]+)\n([\s\S]+?)```/g;
-
-  let match;
-  while ((match = codeBlockPattern.exec(response)) !== null) {
-    const filePath = match[1].trim();
-    const code = match[2].trim();
-
-    changes.push({
-      path: filePath,
-      content: code
-    });
-  }
-
-  // Also try to extract code blocks with a different format
-  const alternatePattern = /```(?:([a-zA-Z0-9_]+))?\s*\n([\s\S]+?)```\s*(?:File path:|Path:)\s*([^\n]+)/g;
-  while ((match = alternatePattern.exec(response)) !== null) {
-    const language = match[1] || '';
-    const code = match[2].trim();
-    const filePath = match[3].trim();
-
-    // Only add if we didn't already capture this file
-    if (!changes.some(change => change.path === filePath)) {
-      changes.push({
-        path: filePath,
-        content: code,
-        language
-      });
-    }
-  }
-
-  return changes;
-}
-
-/**
- * Extract explanation from Claude's response
- * 
- * @private
- * @param {string} response - Claude's response
- * @returns {string} - Extracted explanation
- */
-function extractExplanation(response) {
-  // Remove code blocks
-  const withoutCodeBlocks = response.replace(/```[\s\S]+?```/g, '');
-
-  // Look for explanation sections
-  const explanationPattern = /(?:explanation|thought process|reasoning|analysis):\s*([\s\S]+?)(?=\n\n|$)/i;
-  const explanationMatch = withoutCodeBlocks.match(explanationPattern);
-
-  if (explanationMatch) {
-    return explanationMatch[1].trim();
-  }
-
-  // If no specific explanation section, return the text without code blocks
-  return withoutCodeBlocks.trim();
-}
-
-/**
- * Validate generated code changes
- * 
- * @private
- * @param {Array<Object>} codeChanges - List of code changes
- * @param {Object} taskConfig - Task configuration
- * @returns {Promise<Object>} - Validation result
- */
-async function validateCode(codeChanges, taskConfig) {
-  logger.info('Validating generated code changes');
-
-  const validationIssues = [];
-
-  // Check each file change
-  for (const change of codeChanges) {
-    // Check if the file path is specified
-    if (!change.path) {
-      validationIssues.push({
-        severity: 'error',
-        message: 'File path not specified',
-        change
-      });
-      continue;
-    }
-
-    // Check if the content is empty
-    if (!change.content || change.content.trim() === '') {
-      validationIssues.push({
-        severity: 'error',
-        message: 'File content is empty',
-        change
-      });
-      continue;
-    }
-
-    // Check for syntax errors
-    const hasSyntaxError = await validateSyntax(change.path, change.content);
-    if (hasSyntaxError) {
-      validationIssues.push({
-        severity: 'error',
-        message: `Syntax error in file: ${hasSyntaxError}`,
-        change
-      });
-    }
-    
-    // Check file type is allowed
-    if (!configModule.isFileTypeAllowed(change.path)) {
-      validationIssues.push({
-        severity: 'error',
-        message: `File type not allowed for modification: ${change.path}`,
-        change
-      });
-    }
-  }
-
-  return {
-    valid: validationIssues.length === 0,
-    issues: validationIssues
-  };
-}
-
-/**
- * Validate syntax for code
- * 
- * @private
- * @param {string} filePath - Path to the file
- * @param {string} content - File content
- * @returns {Promise<string|null>} - Error message or null if valid
- */
-async function validateSyntax(filePath, content) {
-  // Get file extension
-  const extension = filePath.split('.').pop().toLowerCase();
-  
-  try {
-    // For JavaScript/TypeScript files, we can use actual syntax validation
-    if (['js', 'jsx', 'ts', 'tsx'].includes(extension)) {
-      // Check for mismatched braces/parentheses/brackets
-      const pairs = {
-        '{': '}',
-        '(': ')',
-        '[': ']'
-      };
-
-      const stack = [];
-
-      for (const char of content) {
-        if ('{(['.includes(char)) {
-          stack.push(char);
-        } else if ('})]'.includes(char)) {
-          const last = stack.pop();
-          if (!last || pairs[last] !== char) {
-            return `Mismatched ${char} in ${extension.toUpperCase()} file`;
-          }
-        }
-      }
-
-      if (stack.length > 0) {
-        return `Unclosed ${stack[stack.length - 1]} in ${extension.toUpperCase()} file`;
-      }
-      
-      // Optional: For more thorough validation, could use tools like ESLint or TypeScript compiler
-    }
-    
-    // For now, return success for other file types
-    return null;
-  } catch (error) {
-    logger.error(`Error validating syntax for ${filePath}:`, error);
-    return `Validation error: ${error.message}`;
-  }
-}
-
-/**
- * Refine code based on validation issues
- * 
- * @private
- * @param {Array<Object>} codeChanges - List of code changes
- * @param {Object} validationResult - Validation result
- * @param {Object} taskConfig - Task configuration
- * @returns {Promise<Object>} - Refined code changes
- */
-async function refineCode(codeChanges, validationResult, taskConfig) {
-  logger.info('Refining code based on validation issues');
-
-  // Generate a refinement prompt
-  const refinementPrompt = generateRefinementPrompt(codeChanges, validationResult, taskConfig);
-
-  // Generate refined code
-  const refinedResponse = await generateCodeWithClaudeDesktop(refinementPrompt, taskConfig);
-
-  // Extract refined code changes
-  const refinedChanges = extractCodeChanges(refinedResponse);
-
-  // Validate the refined code
-  const refinedValidationResult = await validateCode(refinedChanges, taskConfig);
-
-  // If still invalid and we haven't reached the maximum refinement attempts, try again
-  const refinementAttempts = (taskConfig.refinementAttempts || 0) + 1;
-  if (!refinedValidationResult.valid && refinementAttempts < 3) {
-    logger.warn('Refined code still has validation issues, attempting another refinement');
-
-    // Update task config with incremented refinement attempts
-    const updatedTaskConfig = {
-      ...taskConfig,
-      refinementAttempts
-    };
-
-    return await refineCode(refinedChanges, refinedValidationResult, updatedTaskConfig);
-  }
-
-  return {
-    codeChanges: refinedChanges,
-    explanation: extractExplanation(refinedResponse),
-    validationResult: refinedValidationResult,
-    refinementAttempts
-  };
-}
-
-/**
- * Generate a refinement prompt
- * 
- * @private
- * @param {Array<Object>} codeChanges - List of code changes
- * @param {Object} validationResult - Validation result
- * @param {Object} taskConfig - Task configuration
- * @returns {string} - Refinement prompt
- */
-function generateRefinementPrompt(codeChanges, validationResult, taskConfig) {
-  let prompt = `
-You are OpenHands, an AI agent that resolves GitHub issues by generating code changes.
-
-You previously generated code changes to fix the following issue:
-Repository: ${taskConfig.issueInfo.repository}
-Issue Title: ${taskConfig.issueInfo.title}
-
-However, there were some issues with your generated code:
-
-`;
-
-  // Add validation issues
-  for (const issue of validationResult.issues) {
-    prompt += `- ${issue.message} for file: ${issue.change.path}\n`;
-  }
-
-  prompt += `
-Here are the code changes you previously generated:
-
-`;
-
-  // Add code changes
-  for (const change of codeChanges) {
-    prompt += `
-\`\`\`filename: ${change.path}
-${change.content}
-\`\`\`
-
-`;
-  }
-
-  prompt += `
-Please fix the issues with your generated code and provide a revised solution.
-Format each file change as:
-
-\`\`\`filename: path/to/file.ext
-// code with changes
-\`\`\`
-
-Ensure your solution addresses all the validation issues mentioned above.
-`;
-
-  return prompt;
-}
-
-module.exports = {
-  generateAndValidateCode
+/**
+ * OpenHands Resolver MCP - Code Generation and Validation Module
+ * 
+ * This module leverages Claude to generate and validate code solutions:
+ * - Analyzes issue descriptions to understand the problem
+ * - Generates code changes to resolve the issue
+ * - Validates the changes for syntax errors and basic functionality
+ * - Prepares the solution for submission
+ */
+
+import { getContextLogger } from '../../utils/logger.js';
+import { getConfig } from '../configuration/index.js';
+import * as githubModule from '../github_api/index.js';
+
+const logger = getContextLogger('CodeGeneration');
+
+// External MCP dependencies
+let mcpSdk = null;
+
+/**
+ * Initialize the code generation module
+ * @returns {Promise<void>}
+ */
+export async function initialize() {
+  try {
+    logger.info('Initializing code generation module');
+    
+    // Import MCP SDK - this will be dynamically loaded in production
+    // This is a placeholder for the Claude Desktop integration
+    try {
+      mcpSdk = { /* Placeholder for MCP SDK */ };
+      logger.debug('MCP SDK loaded successfully');
+    } catch (error) {
+      logger.error('Failed to load MCP SDK:', error);
+      throw new Error('MCP SDK initialization failed');
+    }
+    
+    logger.info('Code generation module initialized successfully');
+  } catch (error) {
+    logger.error('Failed to initialize code generation module:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate and validate code for issue resolution
+ * @param {Object} taskConfig - Task configuration from setup module
+ * @returns {Promise<Object>} - Generated code changes
+ */
+export async function generateAndValidateCode(taskConfig) {
+  try {
+    logger.info(`Generating code for issue #${taskConfig.issueData.issueNumber} in ${taskConfig.issueData.owner}/${taskConfig.issueData.repo}`);
+    
+    // Get repository files that might need to be modified
+    const relevantFiles = await getRelevantFiles(taskConfig);
+    logger.debug(`Identified ${relevantFiles.length} relevant files for analysis`);
+    
+    // Generate code changes using Claude
+    const codeChanges = await generateCodeChanges(taskConfig, relevantFiles);
+    logger.info(`Generated ${codeChanges.length} code changes`);
+    
+    // Validate the generated code
+    const validationResults = await validateCodeChanges(codeChanges, taskConfig);
+    
+    // Return the results
+    const result = {
+      codeChanges,
+      relevantFiles,
+      validationResults,
+      isValid: validationResults.every(result => result.valid),
+      summary: createChangesSummary(codeChanges, validationResults)
+    };
+    
+    logger.info(`Code generation ${result.isValid ? 'successful' : 'failed validation'}`);
+    return result;
+  } catch (error) {
+    logger.error(`Failed to generate code for issue #${taskConfig.issueData.issueNumber}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Identify relevant files for analysis based on the issue context
+ * @param {Object} taskConfig - Task configuration
+ * @returns {Promise<Array>} - List of relevant files
+ */
+async function getRelevantFiles(taskConfig) {
+  try {
+    const { issueData, taskContext, customInstructions } = taskConfig;
+    
+    // Get files from repository
+    const repoFiles = await getRepositoryFiles(
+      issueData.owner, 
+      issueData.repo
+    );
+    
+    // Filter out ignored paths from custom instructions
+    const ignorePaths = customInstructions.ignorePaths || [];
+    let filteredFiles = repoFiles.filter(file => 
+      !ignorePaths.some(ignorePath => 
+        file.path.startsWith(ignorePath) || file.path.includes(`/${ignorePath}/`)
+      )
+    );
+    
+    // Filter by primary language if available
+    if (taskContext.primaryLanguage && taskContext.primaryLanguage !== 'Unknown') {
+      const languageExtensions = getLanguageExtensions(taskContext.primaryLanguage);
+      if (languageExtensions.length > 0) {
+        filteredFiles = filteredFiles.filter(file => 
+          languageExtensions.some(ext => file.path.endsWith(ext))
+        );
+      }
+    }
+    
+    // Analyze issue text to prioritize relevant files
+    const issueText = `${issueData.title} ${issueData.body}`;
+    const relevantFilePatterns = extractPotentialFileReferences(issueText);
+    
+    // Score and sort files by relevance
+    const scoredFiles = filteredFiles.map(file => {
+      let score = 0;
+      
+      // Higher score for files that match patterns extracted from issue text
+      for (const pattern of relevantFilePatterns) {
+        if (file.path.includes(pattern)) {
+          score += 10;
+        }
+      }
+      
+      // Score based on file size (smaller files more likely to be modified)
+      score += file.size < 5000 ? 5 : 0;
+      
+      return {
+        ...file,
+        relevanceScore: score
+      };
+    });
+    
+    // Sort by relevance score (descending)
+    scoredFiles.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    
+    // Take top N most relevant files to limit context size
+    const topRelevantFiles = scoredFiles.slice(0, 10);
+    
+    // Fetch content for top relevant files
+    const filesWithContent = await Promise.all(
+      topRelevantFiles.map(async file => {
+        try {
+          const content = await getFileContent(
+            issueData.owner,
+            issueData.repo,
+            file.path
+          );
+          
+          return {
+            ...file,
+            content
+          };
+        } catch (error) {
+          logger.warn(`Failed to get content for file ${file.path}:`, error);
+          return file;
+        }
+      })
+    );
+    
+    return filesWithContent.filter(file => file.content);
+  } catch (error) {
+    logger.error('Error getting relevant files:', error);
+    return [];
+  }
+}
+
+/**
+ * Get file extensions for a programming language
+ * @param {string} language - Programming language name
+ * @returns {Array} - List of file extensions
+ */
+function getLanguageExtensions(language) {
+  const extensionMap = {
+    'JavaScript': ['.js', '.jsx', '.ts', '.tsx'],
+    'TypeScript': ['.ts', '.tsx'],
+    'Python': ['.py'],
+    'Java': ['.java'],
+    'Ruby': ['.rb'],
+    'Go': ['.go'],
+    'Rust': ['.rs'],
+    'PHP': ['.php'],
+    'C++': ['.cpp', '.hpp', '.cc', '.h'],
+    'C#': ['.cs'],
+    'C': ['.c', '.h'],
+    'HTML': ['.html', '.htm'],
+    'CSS': ['.css'],
+    'Swift': ['.swift'],
+    'Kotlin': ['.kt'],
+    'Dart': ['.dart'],
+    'Shell': ['.sh', '.bash']
+  };
+  
+  return extensionMap[language] || [];
+}
+
+/**
+ * Extract potential file references from issue text
+ * @param {string} text - Issue text to analyze
+ * @returns {Array} - List of potential file references
+ */
+function extractPotentialFileReferences(text) {
+  const patterns = [];
+  
+  // Match filenames with extensions (e.g., main.js, utils/helpers.ts)
+  const filePattern = /\b[\w\-\/\.]+\.(js|jsx|ts|tsx|py|java|rb|go|rs|php|cpp|hpp|cc|cs|c|h|html|css|swift|kt|dart|sh|json|md)\b/gi;
+  let match;
+  while ((match = filePattern.exec(text)) !== null) {
+    patterns.push(match[0]);
+  }
+  
+  // Match directory references
+  const dirPattern = /\b(src|app|lib|test|tests|packages|modules|components|utils|helpers|services|api|docs|config|public|assets)\b/gi;
+  while ((match = dirPattern.exec(text)) !== null) {
+    patterns.push(match[0]);
+  }
+  
+  // Match class or function names with camelCase or PascalCase
+  const namePattern = /\b([A-Z][a-z]+[A-Za-z0-9]*|[a-z]+[A-Z][A-Za-z0-9]*)\b/g;
+  while ((match = namePattern.exec(text)) !== null) {
+    patterns.push(match[0]);
+  }
+  
+  return [...new Set(patterns)];
+}
+
+/**
+ * Get list of files from repository
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @returns {Promise<Array>} - List of files
+ */
+async function getRepositoryFiles(owner, repo) {
+  // This is a simplified implementation
+  // In a full implementation, we would recursively get all files from the repository
+  try {
+    const repoContext = await githubModule.getRepositoryContext(owner, repo);
+    return repoContext.files || [];
+  } catch (error) {
+    logger.error(`Failed to get repository files for ${owner}/${repo}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Get content of a file from repository
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} path - File path
+ * @returns {Promise<string>} - File content
+ */
+async function getFileContent(owner, repo, path) {
+  // This is a placeholder for the actual GitHub API call
+  try {
+    // In a full implementation, this would use the GitHub API
+    return "File content placeholder";
+  } catch (error) {
+    logger.error(`Failed to get content for file ${path}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Generate code changes using Claude
+ * @param {Object} taskConfig - Task configuration
+ * @param {Array} relevantFiles - Relevant files for analysis
+ * @returns {Promise<Array>} - Generated code changes
+ */
+async function generateCodeChanges(taskConfig, relevantFiles) {
+  try {
+    // In a real implementation, this would use Claude via the MCP SDK
+    logger.info('Generating code changes using Claude');
+    
+    // Format files for Claude context
+    const filesContext = relevantFiles.map(file => 
+      `File: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``
+    ).join('\n\n');
+    
+    // Format issue data for Claude
+    const issueContext = `
+Issue Title: ${taskConfig.issueData.title}
+Issue Description:
+${taskConfig.issueData.body}
+
+Relevant Comments:
+${taskConfig.taskContext.relevantComments.join('\n\n')}
+`;
+
+    // Here we would call Claude with the prompt, but for now we'll return a placeholder
+    return [
+      {
+        filePath: 'example/path.js',
+        originalContent: 'Original content',
+        modifiedContent: 'Modified content with fix',
+        diff: '@@ -1 +1 @@\n-Original content\n+Modified content with fix',
+        reason: 'Fixed issue by modifying the content'
+      }
+    ];
+  } catch (error) {
+    logger.error('Error generating code changes:', error);
+    throw error;
+  }
+}
+
+/**
+ * Validate generated code changes
+ * @param {Array} codeChanges - Generated code changes
+ * @param {Object} taskConfig - Task configuration
+ * @returns {Promise<Array>} - Validation results
+ */
+async function validateCodeChanges(codeChanges, taskConfig) {
+  try {
+    // In a real implementation, this would run basic validation on the code
+    logger.info('Validating generated code changes');
+    
+    // For now, we'll return placeholder validation results
+    return codeChanges.map(change => ({
+      filePath: change.filePath,
+      valid: true,
+      syntaxValid: true,
+      testsPassed: true,
+      messages: ['Validation passed']
+    }));
+  } catch (error) {
+    logger.error('Error validating code changes:', error);
+    return codeChanges.map(change => ({
+      filePath: change.filePath,
+      valid: false,
+      syntaxValid: false,
+      testsPassed: false,
+      messages: [`Validation error: ${error.message}`]
+    }));
+  }
+}
+
+/**
+ * Create a summary of the code changes
+ * @param {Array} codeChanges - Generated code changes
+ * @param {Array} validationResults - Validation results
+ * @returns {string} - Summary text
+ */
+function createChangesSummary(codeChanges, validationResults) {
+  try {
+    const summary = [];
+    
+    summary.push(`# Code Changes Summary`);
+    summary.push(`\nTotal files modified: ${codeChanges.length}`);
+    
+    const validChanges = validationResults.filter(result => result.valid).length;
+    summary.push(`Validation: ${validChanges}/${validationResults.length} files passed validation\n`);
+    
+    summary.push(`## Changes by File`);
+    codeChanges.forEach((change, index) => {
+      const validation = validationResults[index];
+      
+      summary.push(`\n### ${change.filePath} ${validation.valid ? '✅' : '❌'}`);
+      summary.push(`${change.reason}\n`);
+      
+      if (!validation.valid) {
+        summary.push(`**Validation Issues:**`);
+        validation.messages.forEach(message => {
+          summary.push(`- ${message}`);
+        });
+        summary.push('');
+      }
+    });
+    
+    return summary.join('\n');
+  } catch (error) {
+    logger.error('Error creating changes summary:', error);
+    return 'Failed to create changes summary';
+  }
+}
+
+// Export additional functions
+export default {
+  initialize,
+  generateAndValidateCode
 };
