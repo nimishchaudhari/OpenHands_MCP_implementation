@@ -1,589 +1,229 @@
-/**
- * OpenHands Task Setup Module
- * 
- * Configures tasks for OpenHands AI agents based on GitHub issue context.
- */
-
-const githubModule = require('../github_api');
-const logger = require('../../utils/logger');
-
-/**
- * Setup a task for AI resolution based on GitHub issue data
- * 
- * @param {Object} issueData - Data from GitHub issue
- * @returns {Promise<Object>} - Task configuration for AI
- */
-async function setupTask(issueData) {
-  try {
-    logger.info(`Setting up task for issue #${issueData.number} in ${issueData.owner}/${issueData.repo}`);
-    
-    // Extract key information from the issue
-    const issueInfo = extractIssueInfo(issueData);
-    
-    // Get custom instructions if available
-    const instructions = await getCustomInstructions(issueData.owner, issueData.repo);
-    
-    // Collect relevant context
-    const context = await collectContext(issueData, issueInfo);
-    
-    // Format the task for AI processing
-    const taskConfig = formatTask(issueInfo, context, instructions);
-    
-    logger.debug('Task setup completed successfully');
-    
-    return taskConfig;
-  } catch (error) {
-    logger.error(`Failed to setup task for issue #${issueData.number}:`, error);
-    throw new Error(`Task setup failed: ${error.message}`);
-  }
-}
-
-/**
- * Extract key information from GitHub issue
- * 
- * @private
- * @param {Object} issueData - GitHub issue data
- * @returns {Object} - Extracted issue information
- */
-function extractIssueInfo(issueData) {
-  // Determine issue type based on labels or content
-  const issueType = determineIssueType(issueData);
-  
-  // Determine issue severity
-  const severity = determineSeverity(issueData);
-  
-  // Extract requirements from issue body
-  const requirements = extractRequirements(issueData.body);
-  
-  // Extract error messages if present
-  const errorMessages = extractErrorMessages(issueData.body);
-  
-  return {
-    id: issueData.number,
-    title: issueData.title,
-    type: issueType,
-    severity,
-    requirements,
-    errorMessages,
-    createdBy: issueData.user,
-    repository: issueData.repository.full_name,
-    repositoryUrl: issueData.repository.url,
-    createdAt: issueData.created_at,
-    updatedAt: issueData.updated_at,
-    hasComments: issueData.comments.length > 0
-  };
-}
-
-/**
- * Determine issue type based on labels and content
- * 
- * @private
- * @param {Object} issueData - GitHub issue data
- * @returns {string} - Issue type
- */
-function determineIssueType(issueData) {
-  const labels = issueData.labels || [];
-  const body = issueData.body || '';
-  const title = issueData.title || '';
-  
-  // Check for bug label
-  if (labels.some(label => /bug|fix|defect/i.test(label))) {
-    return 'bug';
-  }
-  
-  // Check for feature label
-  if (labels.some(label => /feature|enhancement|improvement/i.test(label))) {
-    return 'feature';
-  }
-  
-  // Check for documentation label
-  if (labels.some(label => /docs|documentation/i.test(label))) {
-    return 'documentation';
-  }
-  
-  // If no specific label, try to infer from content
-  if (/fix|bug|issue|error|fail|crash/i.test(title) || /fix|bug|issue|error|fail|crash/i.test(body)) {
-    return 'bug';
-  }
-  
-  if (/feature|add|enhance|implement|support/i.test(title)) {
-    return 'feature';
-  }
-  
-  if (/document|docs|explain|clarify/i.test(title)) {
-    return 'documentation';
-  }
-  
-  // Default
-  return 'task';
-}
-
-/**
- * Determine issue severity based on labels and content
- * 
- * @private
- * @param {Object} issueData - GitHub issue data
- * @returns {string} - Issue severity
- */
-function determineSeverity(issueData) {
-  const labels = issueData.labels || [];
-  const body = issueData.body || '';
-  
-  // Check for severity/priority labels
-  if (labels.some(label => /critical|p0|blocker/i.test(label))) {
-    return 'critical';
-  }
-  
-  if (labels.some(label => /high|p1|major/i.test(label))) {
-    return 'high';
-  }
-  
-  if (labels.some(label => /medium|p2|normal/i.test(label))) {
-    return 'medium';
-  }
-  
-  if (labels.some(label => /low|p3|minor|trivial/i.test(label))) {
-    return 'low';
-  }
-  
-  // Check for keywords in content
-  if (/urgent|critical|emergency|severe|blocking/i.test(body)) {
-    return 'high';
-  }
-  
-  // Default
-  return 'medium';
-}
-
-/**
- * Extract requirements from issue body
- * 
- * @private
- * @param {string} body - Issue body text
- * @returns {Array} - List of requirements
- */
-function extractRequirements(body) {
-  if (!body) return [];
-  
-  const requirements = [];
-  
-  // Look for checklist items
-  const checklistRegex = /- \[([ x])\] (.+?)(?=\n|$)/g;
-  let match;
-  while ((match = checklistRegex.exec(body)) !== null) {
-    requirements.push(match[2].trim());
-  }
-  
-  // If no checklist, look for bullet points
-  if (requirements.length === 0) {
-    const bulletRegex = /[-*] (.+?)(?=\n|$)/g;
-    while ((match = bulletRegex.exec(body)) !== null) {
-      requirements.push(match[1].trim());
-    }
-  }
-  
-  // If still no requirements, try to split by newlines
-  if (requirements.length === 0) {
-    const lines = body.split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 10 && !line.startsWith('#') && !line.startsWith('<!--'));
-    
-    requirements.push(...lines);
-  }
-  
-  return requirements;
-}
-
-/**
- * Extract error messages from issue body
- * 
- * @private
- * @param {string} body - Issue body text
- * @returns {Array} - List of error messages
- */
-function extractErrorMessages(body) {
-  if (!body) return [];
-  
-  const errorMessages = [];
-  
-  // Look for code blocks that might contain errors
-  const codeBlockRegex = /```(?:\w+)?\n([\s\S]+?)\n```/g;
-  let match;
-  while ((match = codeBlockRegex.exec(body)) !== null) {
-    const codeBlock = match[1];
-    
-    // Check if code block contains error keywords
-    if (/error|exception|fail|traceback|stack trace/i.test(codeBlock)) {
-      errorMessages.push(codeBlock.trim());
-    }
-  }
-  
-  // Look for lines that look like error messages
-  const errorRegex = /(error|exception|failure|warning):?\s+(.+?)(?=\n|$)/gi;
-  while ((match = errorRegex.exec(body)) !== null) {
-    errorMessages.push(match[0].trim());
-  }
-  
-  return errorMessages;
-}
-
-/**
- * Get custom instructions from repository
- * 
- * @private
- * @param {string} owner - Repository owner
- * @param {string} repo - Repository name
- * @returns {Promise<Object>} - Custom instructions if available
- */
-async function getCustomInstructions(owner, repo) {
-  try {
-    // Check for .openhands_instructions file
-    const instructionsContent = await githubModule.fetchFileContent(
-      owner, 
-      repo, 
-      '.openhands_instructions'
-    );
-    
-    // Parse JSON or YAML instructions
-    try {
-      return JSON.parse(instructionsContent);
-    } catch (e) {
-      // Not valid JSON, return as string
-      return { rawInstructions: instructionsContent };
-    }
-  } catch (error) {
-    // File doesn't exist or can't be accessed, which is okay
-    logger.debug(`No custom instructions found for ${owner}/${repo}`);
-    return {};
-  }
-}
-
-/**
- * Collect context for task resolution
- * 
- * @private
- * @param {Object} issueData - GitHub issue data
- * @param {Object} issueInfo - Extracted issue information
- * @returns {Promise<Object>} - Collected context
- */
-async function collectContext(issueData, issueInfo) {
-  // For bugs, collect relevant code snippets
-  const codeSnippets = await collectCodeSnippets(issueData);
-  
-  // Collect comments that might provide additional context
-  const relevantComments = filterRelevantComments(issueData.comments);
-  
-  // For bugs, try to find similar issues
-  const similarIssues = issueInfo.type === 'bug' 
-    ? await findSimilarIssues(issueData)
-    : [];
-  
-  // Get repository structure to understand the codebase
-  const repoStructure = await getRepositoryStructure(issueData.owner, issueData.repo);
-  
-  return {
-    codeSnippets,
-    relevantComments,
-    similarIssues,
-    repoStructure
-  };
-}
-
-/**
- * Collect code snippets from issue and referenced files
- * 
- * @private
- * @param {Object} issueData - GitHub issue data
- * @returns {Promise<Array>} - Collected code snippets
- */
-async function collectCodeSnippets(issueData) {
-  const snippets = [];
-  
-  // Extract code blocks from issue body
-  const codeBlockRegex = /```(?:(\w+))?\n([\s\S]+?)\n```/g;
-  const body = issueData.body || '';
-  
-  let match;
-  while ((match = codeBlockRegex.exec(body)) !== null) {
-    const language = match[1] || 'unknown';
-    const code = match[2];
-    
-    snippets.push({
-      source: 'issue_body',
-      language,
-      code,
-      lineCount: code.split('\n').length
-    });
-  }
-  
-  // Extract file paths mentioned in the issue
-  const filePathRegex = /(?:in|at|file|path):\s*['"]([\w\-\/\.]+)['"]|['"]([\w\-\/\.]+\.\w+)['"]/g;
-  const filePaths = new Set();
-  
-  while ((match = filePathRegex.exec(body)) !== null) {
-    const path = match[1] || match[2];
-    if (path && /\.\w+$/.test(path)) { // Ensure it looks like a file path with extension
-      filePaths.add(path);
-    }
-  }
-  
-  // Extract code from mentioned files
-  for (const path of filePaths) {
-    try {
-      const fileContent = await githubModule.fetchFileContent(
-        issueData.owner,
-        issueData.repo,
-        path
-      );
-      
-      // Guess language from file extension
-      const extensionMatch = path.match(/\.(\w+)$/);
-      const language = extensionMatch ? extensionMatch[1] : 'unknown';
-      
-      snippets.push({
-        source: 'referenced_file',
-        path,
-        language,
-        code: fileContent,
-        lineCount: fileContent.split('\n').length
-      });
-    } catch (error) {
-      logger.debug(`Could not fetch referenced file: ${path}`);
-    }
-  }
-  
-  return snippets;
-}
-
-/**
- * Filter comments that provide relevant context
- * 
- * @private
- * @param {Array} comments - Issue comments
- * @returns {Array} - Relevant comments
- */
-function filterRelevantComments(comments) {
-  if (!comments || comments.length === 0) return [];
-  
-  return comments
-    .filter(comment => {
-      const body = comment.body || '';
-      
-      // Check for keywords that might indicate useful information
-      return (
-        /repro|steps|here's what|this happens|i tried|error|fail|does not work/i.test(body) ||
-        body.includes('```') // Contains code block
-      );
-    })
-    .map(comment => ({
-      id: comment.id,
-      user: comment.user,
-      body: comment.body,
-      created_at: comment.created_at,
-      has_code: comment.body.includes('```')
-    }));
-}
-
-/**
- * Find similar issues that might provide insight
- * 
- * @private
- * @param {Object} issueData - GitHub issue data
- * @returns {Promise<Array>} - Similar issues
- */
-async function findSimilarIssues(issueData) {
-  // This is a simplified implementation
-  // In a full implementation, this would search for similar issues using GitHub API
-  
-  return []; // Placeholder for future implementation
-}
-
-/**
- * Get repository structure to understand the codebase context
- * 
- * @private
- * @param {string} owner - Repository owner
- * @param {string} repo - Repository name
- * @returns {Promise<Object>} - Repository structure
- */
-async function getRepositoryStructure(owner, repo) {
-  try {
-    // Get top-level directories to understand project structure
-    const files = await githubModule.fetchRepositoryFiles(owner, repo, '');
-    
-    // Process directories to get a summary of the project structure
-    const directories = files.filter(file => file.type === 'dir');
-    const structure = {
-      name: repo,
-      top_level_dirs: directories.map(dir => dir.name),
-      files_count: files.length
-    };
-    
-    // Try to get package configuration files for more context
-    try {
-      // Check for package.json (Node.js)
-      const packageJson = await githubModule.fetchFileContent(owner, repo, 'package.json');
-      structure.packageJson = JSON.parse(packageJson);
-    } catch (e) {
-      // No package.json or error parsing it, which is fine
-    }
-    
-    try {
-      // Check for README.md
-      const readme = await githubModule.fetchFileContent(owner, repo, 'README.md');
-      structure.readme = readme;
-    } catch (e) {
-      // No README.md, which is fine
-    }
-    
-    return structure;
-  } catch (error) {
-    logger.warn(`Could not fetch repository structure for ${owner}/${repo}:`, error);
-    return {
-      name: repo,
-      error: true
-    };
-  }
-}
-
-/**
- * Format task for AI processing
- * 
- * @private
- * @param {Object} issueInfo - Extracted issue information
- * @param {Object} context - Collected context
- * @param {Object} instructions - Custom instructions
- * @returns {Object} - Formatted task
- */
-function formatTask(issueInfo, context, instructions) {
-  // Generate a title for the task
-  const taskTitle = `[${issueInfo.type.toUpperCase()}] ${issueInfo.title}`;
-  
-  // Create a structured description with all available information
-  const taskDescription = createTaskDescription(issueInfo, context);
-  
-  // Apply any custom instructions
-  const customInstructions = instructions.rawInstructions || '';
-  
-  // Prepare file snippets in a format that's easy for AI to parse
-  const codeContext = prepareCodeContext(context.codeSnippets);
-  
-  // Prioritize the task based on severity and age
-  const priority = calculatePriority(issueInfo);
-  
-  return {
-    title: taskTitle,
-    description: taskDescription,
-    type: issueInfo.type,
-    priority,
-    issueNumber: issueInfo.id,
-    repository: issueInfo.repository,
-    codeContext,
-    customInstructions,
-    similarIssues: context.similarIssues,
-    repositoryStructure: context.repoStructure
-  };
-}
-
-/**
- * Create a detailed task description
- * 
- * @private
- * @param {Object} issueInfo - Extracted issue information
- * @param {Object} context - Collected context
- * @returns {string} - Formatted task description
- */
-function createTaskDescription(issueInfo, context) {
-  let description = `# ${issueInfo.title}\n\n`;
-  
-  // Add issue details
-  description += `**Issue Type:** ${issueInfo.type}\n`;
-  description += `**Severity:** ${issueInfo.severity}\n`;
-  description += `**Created By:** ${issueInfo.createdBy}\n`;
-  description += `**Issue Number:** #${issueInfo.id}\n`;
-  description += `**Repository:** ${issueInfo.repository}\n\n`;
-  
-  // Add requirements if available
-  if (issueInfo.requirements && issueInfo.requirements.length > 0) {
-    description += `## Requirements\n`;
-    issueInfo.requirements.forEach(req => {
-      description += `- ${req}\n`;
-    });
-    description += '\n';
-  }
-  
-  // Add error messages if available
-  if (issueInfo.errorMessages && issueInfo.errorMessages.length > 0) {
-    description += `## Error Messages\n`;
-    issueInfo.errorMessages.forEach(err => {
-      description += `\`\`\`\n${err}\n\`\`\`\n`;
-    });
-    description += '\n';
-  }
-  
-  // Add relevant comments if available
-  if (context.relevantComments && context.relevantComments.length > 0) {
-    description += `## Additional Context from Comments\n`;
-    context.relevantComments.forEach(comment => {
-      description += `**${comment.user} commented:**\n`;
-      description += `${comment.body}\n\n`;
-    });
-  }
-  
-  return description;
-}
-
-/**
- * Prepare code context for AI processing
- * 
- * @private
- * @param {Array} snippets - Code snippets
- * @returns {Object} - Prepared code context
- */
-function prepareCodeContext(snippets) {
-  if (!snippets || snippets.length === 0) {
-    return { hasCode: false };
-  }
-  
-  // Organize snippets by source
-  const issueSnippets = snippets.filter(s => s.source === 'issue_body');
-  const fileSnippets = snippets.filter(s => s.source === 'referenced_file');
-  
-  return {
-    hasCode: true,
-    issueSnippets,
-    fileSnippets,
-    totalSnippets: snippets.length
-  };
-}
-
-/**
- * Calculate task priority
- * 
- * @private
- * @param {Object} issueInfo - Issue information
- * @returns {number} - Priority score (1-10)
- */
-function calculatePriority(issueInfo) {
-  let score = 5; // Default medium priority
-  
-  // Adjust based on severity
-  if (issueInfo.severity === 'critical') score += 3;
-  else if (issueInfo.severity === 'high') score += 2;
-  else if (issueInfo.severity === 'low') score -= 2;
-  
-  // Adjust based on age (newer issues might be more urgent)
-  const ageInDays = (new Date() - new Date(issueInfo.createdAt)) / (1000 * 60 * 60 * 24);
-  if (ageInDays < 1) score += 1; // Very recent issues
-  else if (ageInDays > 30) score -= 1; // Older issues
-  
-  // Adjust based on type
-  if (issueInfo.type === 'bug') score += 1;
-  
-  // Ensure score is within bounds
-  return Math.max(1, Math.min(10, Math.round(score)));
-}
-
-module.exports = {
-  setupTask
+/**
+ * OpenHands Resolver MCP - Task Setup Module
+ * 
+ * This module prepares tasks for OpenHands AI agents by:
+ * - Combining GitHub issue data and repository context
+ * - Incorporating custom instructions if available
+ * - Formatting the task for optimal AI processing
+ */
+
+import { getContextLogger } from '../../utils/logger.js';
+import { getConfig } from '../configuration/index.js';
+import * as githubModule from '../github_api/index.js';
+
+const logger = getContextLogger('TaskSetup');
+
+/**
+ * Setup a task for AI resolution
+ * @param {Object} issueData - GitHub issue data
+ * @returns {Promise<Object>} - Task configuration
+ */
+export async function setupTask(issueData) {
+  try {
+    logger.info(`Setting up task for issue #${issueData.issueNumber} in ${issueData.owner}/${issueData.repo}`);
+    
+    // Get AI configurations
+    const aiConfig = getConfig('ai');
+    
+    // Get repository context for additional information
+    const repoContext = await githubModule.getRepositoryContext(
+      issueData.owner, 
+      issueData.repo
+    );
+    
+    // Extract custom instructions if available
+    const customInstructions = repoContext.instructions || {};
+    
+    // Prepare the task context
+    const taskContext = prepareTaskContext(issueData, repoContext, customInstructions);
+    
+    // Create the AI task configuration
+    const taskConfig = {
+      issueData,
+      repoContext,
+      customInstructions,
+      taskContext,
+      aiConfig: {
+        model: aiConfig.model,
+        temperature: aiConfig.temperature,
+        maxTokens: aiConfig.maxTokens,
+        systemMessage: createSystemMessage(issueData, repoContext, customInstructions)
+      }
+    };
+    
+    logger.debug('Task setup completed successfully');
+    return taskConfig;
+  } catch (error) {
+    logger.error(`Failed to setup task for issue #${issueData.issueNumber}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Prepare the task context by combining issue and repository data
+ * @param {Object} issueData - GitHub issue data
+ * @param {Object} repoContext - Repository context data
+ * @param {Object} customInstructions - Custom instructions from repository
+ * @returns {Object} - Prepared task context
+ */
+function prepareTaskContext(issueData, repoContext, customInstructions) {
+  try {
+    // Extract relevant information from issue
+    const { title, body, comments, labels } = issueData;
+    
+    // Determine primary programming language
+    const primaryLanguage = repoContext.languages[0] || 'Unknown';
+    
+    // Check for additional context in comments
+    const relevantComments = comments.filter(comment => {
+      // Filter comments that might contain important context
+      return comment.body.includes('reproducing') ||
+             comment.body.includes('steps to reproduce') ||
+             comment.body.includes('error message') ||
+             comment.body.includes('expected behavior') ||
+             comment.body.includes('additional context');
+    });
+    
+    // Check for priority indicators
+    const priorityLabels = customInstructions.priorityLabels || ['high-priority', 'priority', 'critical', 'urgent'];
+    const isPriority = labels.some(label => priorityLabels.includes(label));
+    
+    // Determine complexity
+    const complexityIndicators = {
+      low: ['simple', 'easy', 'trivial', 'typo', 'minor'],
+      medium: ['moderate', 'enhancement', 'improvement'],
+      high: ['complex', 'difficult', 'major', 'refactor']
+    };
+    
+    let complexity = 'medium';
+    for (const [level, indicators] of Object.entries(complexityIndicators)) {
+      if (title.toLowerCase().split(' ').some(word => indicators.includes(word)) ||
+          body.toLowerCase().split(' ').some(word => indicators.includes(word)) ||
+          labels.some(label => indicators.includes(label.toLowerCase()))) {
+        complexity = level;
+        break;
+      }
+    }
+    
+    // Create the task context
+    return {
+      issueTitle: title,
+      issueBody: body,
+      relevantComments: relevantComments.map(comment => comment.body),
+      primaryLanguage,
+      languages: repoContext.languages,
+      isPriority,
+      complexity,
+      hasCustomInstructions: Object.keys(customInstructions).length > 0,
+      codeStyle: customInstructions.codeStyle || 'standard',
+      testRequirements: customInstructions.testRequirements || null,
+      ignorePaths: customInstructions.ignorePaths || []
+    };
+  } catch (error) {
+    logger.error('Error preparing task context:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a system message for the AI based on the task
+ * @param {Object} issueData - GitHub issue data
+ * @param {Object} repoContext - Repository context data
+ * @param {Object} customInstructions - Custom instructions from repository
+ * @returns {string} - Formatted system message
+ */
+function createSystemMessage(issueData, repoContext, customInstructions) {
+  try {
+    // Get base system message from config
+    const baseMessage = getConfig('ai').systemMessage;
+    
+    // Add custom instructions if available
+    let customInstructionsText = '';
+    if (Object.keys(customInstructions).length > 0) {
+      customInstructionsText = `
+Repository-specific instructions:
+- Code Style: ${customInstructions.codeStyle || 'standard'}
+${customInstructions.testRequirements ? `- Test Requirements: ${customInstructions.testRequirements}` : ''}
+${customInstructions.ignorePaths && customInstructions.ignorePaths.length > 0 ? 
+  `- Ignore Paths: ${customInstructions.ignorePaths.join(', ')}` : ''}
+`;
+    }
+    
+    // Add repository context
+    const repoContextText = `
+You are working on the repository ${repoContext.owner}/${repoContext.repo}
+Primary language: ${repoContext.languages[0] || 'Unknown'}
+${repoContext.description ? `Repository description: ${repoContext.description}` : ''}
+`;
+    
+    // Combine everything
+    return `${baseMessage}
+
+${repoContextText}
+${customInstructionsText}
+
+Your task is to analyze and resolve GitHub issue #${issueData.issueNumber}: "${issueData.title}"
+
+Follow these steps:
+1. Analyze the issue description and context
+2. Identify the root cause of the problem
+3. Generate appropriate code changes to resolve the issue
+4. Validate your solution against the repository's requirements
+5. Prepare a clear explanation of your changes
+
+Ensure your solution is:
+- Focused on the specific issue
+- Compatible with the repository's coding style
+- Well-documented with appropriate comments
+- Accompanied by tests if required
+- Ready to be submitted as a pull request
+`;
+  } catch (error) {
+    logger.error('Error creating system message:', error);
+    return getConfig('ai').systemMessage;
+  }
+}
+
+/**
+ * Validate the prepared task
+ * @param {Object} taskConfig - Task configuration to validate
+ * @returns {boolean} - Whether the task is valid
+ */
+export function validateTask(taskConfig) {
+  try {
+    // Check for required fields
+    if (!taskConfig.issueData || !taskConfig.taskContext) {
+      logger.warn('Invalid task configuration: missing required fields');
+      return false;
+    }
+    
+    // Validate specific fields
+    const requiredFields = {
+      'issueData.issueNumber': taskConfig.issueData.issueNumber,
+      'issueData.owner': taskConfig.issueData.owner,
+      'issueData.repo': taskConfig.issueData.repo,
+      'issueData.title': taskConfig.issueData.title,
+      'taskContext.issueTitle': taskConfig.taskContext.issueTitle,
+      'taskContext.primaryLanguage': taskConfig.taskContext.primaryLanguage,
+      'aiConfig.model': taskConfig.aiConfig.model
+    };
+    
+    for (const [field, value] of Object.entries(requiredFields)) {
+      if (!value) {
+        logger.warn(`Invalid task configuration: missing ${field}`);
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    logger.error('Error validating task:', error);
+    return false;
+  }
+}
+
+// Export additional functions
+export default {
+  setupTask,
+  validateTask
 };
