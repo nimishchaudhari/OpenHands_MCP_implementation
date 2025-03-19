@@ -18,10 +18,12 @@ import * as codeGenModule from './modules/code_generation/index.js';
 import * as commitPrModule from './modules/commit_pr/index.js';
 import * as feedbackModule from './modules/feedback/index.js';
 import * as batchModule from './modules/batch_processing/index.js';
+import * as trackingModelsModule from './modules/tracking_models/index.js';
 import { logger } from './utils/logger.js';
 
 // Track initialization state
 let isInitialized = false;
+let trackingModel = null;
 
 /**
  * Initialize the OpenHands Resolver
@@ -45,6 +47,12 @@ async function initialize(configPath) {
     await githubModule.initialize();
     logger.debug('GitHub API module initialized');
     
+    // Initialize tracking model
+    const trackingModelType = configModule.getConfig().trackingModel?.type || trackingModelsModule.MODEL_TYPES.DEFAULT;
+    const trackingModelConfig = configModule.getConfig().trackingModel?.config || {};
+    trackingModel = trackingModelsModule.createTracker(trackingModelType, trackingModelConfig);
+    logger.debug(`Tracking model initialized: ${trackingModelType}`);
+    
     isInitialized = true;
     logger.info('OpenHands Resolver MCP initialized successfully');
     return true;
@@ -52,6 +60,14 @@ async function initialize(configPath) {
     logger.error('Failed to initialize OpenHands Resolver MCP:', error);
     return false;
   }
+}
+
+/**
+ * Get the current tracking model instance
+ * @returns {Object} - Tracking model instance
+ */
+function getTrackingModel() {
+  return trackingModel;
 }
 
 /**
@@ -183,11 +199,17 @@ function getMcpInfo() {
     version: '0.1.0',
     description: 'AI-driven GitHub issue resolution system',
     initialized: isInitialized,
+    trackingModels: trackingModelsModule.getAvailableModels(),
+    activeTrackingModel: trackingModel ? {
+      type: trackingModel.getConfig().modelVariant || 'unknown',
+      config: trackingModel.getConfig()
+    } : null,
     capabilities: [
       'GitHub issue resolution',
       'Code generation and validation',
       'Pull request creation',
-      'Batch processing'
+      'Batch processing',
+      'SignedPnp hand tracking'
     ]
   };
 }
@@ -197,5 +219,6 @@ export {
   handleMcpInvocation,
   resolveIssue,
   resolveBatch,
-  getMcpInfo
+  getMcpInfo,
+  getTrackingModel
 };
