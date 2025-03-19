@@ -6,7 +6,7 @@ The OpenHands Resolver is an AI-driven system designed to automate GitHub issue 
 
 ## Architecture
 
-The OpenHands Resolver comprises eight key modules that collaborate to detect, process, and resolve GitHub issues:
+The OpenHands Resolver comprises nine key modules that collaborate to detect, process, and resolve GitHub issues:
 
 - **Trigger Detection Module**: Identifies when to start the resolution process based on natural language requests, GitHub events, or manual commands.
 - **GitHub API Integration Module**: Manages all GitHub interactions for issue retrieval and pull request creation.
@@ -16,6 +16,7 @@ The OpenHands Resolver comprises eight key modules that collaborate to detect, p
 - **Feedback and Visualization Module**: Provides resolution feedback and visualizes outcomes.
 - **Batch Processing Module**: Enables simultaneous resolution of multiple issues.
 - **Configuration Module**: Manages settings for AI models, tokens, and custom instructions.
+- **Tracking Models Module**: Implements hand tracking models including SignedPnp for improved accuracy.
 
 ## Features
 
@@ -28,6 +29,33 @@ The OpenHands Resolver comprises eight key modules that collaborate to detect, p
 - **Feedback System**: Posts comments on GitHub issues with resolution status
 - **Visualization**: Generates visual summaries of the resolution process
 - **Customizable**: Configure resolution behavior with custom instructions files
+- **SignedPnp Tracking**: Enhanced hand tracking with signed point-to-plane measurements
+
+## SignedPnp Tracking Model
+
+The SignedPnp tracking model provides enhanced hand tracking capabilities using signed point-to-plane measurements for improved accuracy. It is designed for use in applications that require precise hand pose estimation.
+
+### Features of SignedPnp Tracking
+
+- **High Accuracy**: Improved hand pose estimation with signed point-to-plane measurements
+- **Robust Initialization**: Optional robust initialization for better tracking stability
+- **Adaptive Weights**: Support for adaptive weighting of measurements based on confidence
+- **Configurable Parameters**: Highly customizable tracking parameters
+- **Visualization**: Built-in tools for visualizing tracking results
+
+### Configuration
+
+The SignedPnp tracking model can be configured through environment variables:
+
+```
+# Tracking Model Settings
+TRACKING_MODEL_TYPE=signed-pnp
+TRACKING_USE_ROBUST_INIT=true
+TRACKING_MAX_ITERATIONS=100
+TRACKING_CONVERGENCE_THRESHOLD=1e-5
+TRACKING_USE_ADAPTIVE_WEIGHTS=true
+TRACKING_MODEL_VARIANT=standard
+```
 
 ## Setup and Usage
 
@@ -66,6 +94,7 @@ OpenHands Resolver can be customized using environment variables, a configuratio
    GITHUB_TOKEN=your_github_token_here
    LOG_LEVEL=info
    AI_MODEL=claude-3-opus-20240229
+   TRACKING_MODEL_TYPE=signed-pnp
    ```
 
 2. **Configuration File** (JSON) for more detailed settings:
@@ -85,6 +114,15 @@ OpenHands Resolver can be customized using environment variables, a configuratio
        "defaultAsDraft": true,
        "titlePrefix": "OpenHands: ",
        "addLabels": ["ai-assisted"]
+     },
+     "trackingModel": {
+       "type": "signed-pnp",
+       "config": {
+         "useRobustInitialization": true,
+         "maxIterations": 100,
+         "convergenceThreshold": 1e-5,
+         "useAdaptiveWeights": true
+       }
      }
    }
    ```
@@ -128,6 +166,12 @@ const batchResult = await openhandsResolver.resolveBatch([
   { issueUrl: 'https://github.com/username/repo/issues/123' },
   { issueUrl: 'https://github.com/username/repo/issues/124' }
 ]);
+
+// Use the SignedPnp tracking model
+const trackingModel = openhandsResolver.getTrackingModel();
+const points = [...]; // 3D point data
+const trackingResult = trackingModel.track(points);
+console.log(trackingResult.pose);
 ```
 
 ## Development
@@ -145,6 +189,7 @@ OpenHands_MCP_implementation/
 │   │   ├── feedback/               # Resolution feedback
 │   │   ├── github_api/             # GitHub API integration
 │   │   ├── task_setup/             # AI task configuration
+│   │   ├── tracking_models/        # Hand tracking models
 │   │   └── trigger_detection/      # Trigger identification
 │   ├── utils/                      # Shared utilities
 │   └── index.js                    # Main entry point
@@ -187,6 +232,7 @@ The OpenHands Resolver integrates with Claude Desktop through the Model Context 
 2. AI-powered code generation and validation
 3. Visualization of resolution results 
 4. Batch processing of multiple issues
+5. Hand tracking with the SignedPnp model
 
 ## Contributing
 
